@@ -15,6 +15,8 @@ model Repo {
   private   Boolean  @default(false)
   webhookId Int?
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events    GithubEvent[]
 }
 
 model Verification {
@@ -39,6 +41,8 @@ model User {
   updatedAt     DateTime  @updatedAt
   accounts      Account[]
   sessions      Session[]
+  repos         Repo[]
+  githubEvents  GithubEvent[]
 
   @@map("user")
 }
@@ -76,4 +80,36 @@ model Account {
 
   @@index([userId])
   @@map("account")
+}
+
+model GithubEvent {
+  id          String      @id @default(cuid())
+  userId      String
+  repoId      String
+  type        EventType
+  title       String
+  description String?
+  payload     Json
+  status      EventStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+}
+
+enum EventType {
+  PR_CONFLICT
+  CI_FAILURE
+  MERGE_ERROR
+  CODE_ERROR
+  PR_REVIEW_REQUESTED
+}
+
+enum EventStatus {
+  PENDING
+  RESOLVING
+  RESOLVED
+  FAILED
+  IGNORED
 }
