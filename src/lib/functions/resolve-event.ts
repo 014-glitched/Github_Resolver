@@ -124,9 +124,19 @@ export const resolveGithubEvent = inngest.createFunction(
           octokit.rest.repos.getCommit({ owner, repo: repoName, ref: sha })
         );
 
+        console.log(
+          "[resolve-event] All files in commit:",
+          commit.data.files?.map((f) => f.filename)
+        );
+
         const changedFiles = (commit.data.files ?? [])
-          .filter((f) => f.filename.match(/\.(ts|tsx|js|jsx|py|go|rs)$/))
+          .filter((f) => f.filename.match(/\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|cs|php|rb)$/))
           .slice(0, 5);
+
+          console.log(
+    "[resolve-event] Matched files:",
+    changedFiles.map((f) => f.filename)
+  );
 
         for (const file of changedFiles) {
           await fetchFile(file.filename, sha);
@@ -241,6 +251,7 @@ export const resolveGithubEvent = inngest.createFunction(
       - If multiple files need changes, include all of them.
       - Do NOT change file paths.
       - Do NOT remove unrelated code.
+      - If you cannot determine a safe fix, return an explanation but set "files" to an empty array.
 
       --------------------------------
       ## EDGE CASE HANDLING
@@ -292,9 +303,16 @@ export const resolveGithubEvent = inngest.createFunction(
       }
 
       // Validate structure
-      if (!result.files?.length) {
-        throw new Error("Claude returned no files to patch");
+      if (!result.files) {
+        throw new Error("Claude returned no files array");
       }
+
+      if (result?.files.length === 0) {
+        throw new Error(
+          `Claude could not determine a safe fix: ${result.explanation}`
+        );
+      }
+
       if (!result.commitMessage) {
         throw new Error("Claude returned no commit message");
       }

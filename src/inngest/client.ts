@@ -1,4 +1,7 @@
 import { Inngest } from "inngest";
 
 // Create a client to send and receive events
-export const inngest = new Inngest({ id: "github-resolver" });
+export const inngest = new Inngest({ 
+    id: "github-resolver",
+    isDev: process.env.NODE_ENV !== "production",
+ });

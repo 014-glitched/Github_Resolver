@@ -96,6 +96,7 @@ model GithubEvent {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  resolveJob ResolveJob? 
 }
 
 enum EventType {
@@ -112,4 +113,30 @@ enum EventStatus {
   RESOLVED
   FAILED
   IGNORED
+}
+
+model ResolveJob {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  status      JobStatus @default(QUEUED)
+  prUrl       String?
+  prNumber    Int?
+  errorMsg    String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  event GithubEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+enum JobStatus {
+  QUEUED
+  FETCHING_CONTEXT
+  ANALYZING
+  PATCHING
+  CREATING_PR
+  COMPLETED
+  FAILED
+  CANCELLED
 }
