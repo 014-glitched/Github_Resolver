@@ -60,6 +60,24 @@ export async function POST(req: Request) {
     return Response.json({ received: true });
   }
 
+  // Check for existing unresolved event of same type for same repo
+  const existing = await prisma.githubEvent.findFirst({
+    where: {
+      repoId: repo.id,
+      type: githubEvent.type,
+      status: { in: ["PENDING", "RESOLVING"] },
+      createdAt: {
+        // Within last 10 minutes — same PR burst
+        gte: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    },
+  });
+
+  if (existing) {
+    // Already tracking this type of error — don't create duplicate
+    return Response.json({ received: true });
+  }
+
   // 5. Save event to DB
   const savedEvent = await prisma.githubEvent.create({
     data: {

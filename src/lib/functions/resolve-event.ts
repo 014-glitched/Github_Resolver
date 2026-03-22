@@ -1,8 +1,7 @@
-
-import { inngest } from "@/src/inngest/client";
+import {inngest} from "@/src/inngest/client";
 import prisma from "../prisma";
 import Anthropic from "@anthropic-ai/sdk";
-import { Octokit } from "octokit";
+import {Octokit} from "octokit";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -12,7 +11,7 @@ const anthropic = new Anthropic({
 async function withRetry<T>(
   fn: () => Promise<T>,
   retries = 3,
-  delayMs = 1000
+  delayMs = 1000,
 ): Promise<T> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -36,10 +35,28 @@ export const resolveGithubEvent = inngest.createFunction(
     id: "resolve-github-event",
     name: "Resolve GitHub Event",
     retries: 2,
+    onFailure: async ({error, event}) => {
+      // Access original event data through event.data.event.data
+      const {eventId} = event.data.event.data;
+
+      await prisma.githubEvent.updateMany({
+        where: {id: eventId},
+        data: {status: "FAILED"},
+      });
+
+      await prisma.resolveJob.updateMany({
+        where: {eventId},
+        data: {
+          status: "FAILED",
+          errorMsg: error.message,
+          completedAt: new Date(),
+        },
+      });
+    },
   },
-  { event: "github/event.resolve" },
-  async ({ event, step }) => {
-    const { eventId } = event.data;
+  {event: "github/event.resolve"},
+  async ({event, step}) => {
+    const {eventId} = event.data;
 
     // ── Validate input ────────────────────────────────────────
     if (!eventId || typeof eventId !== "string") {
@@ -49,8 +66,8 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 1: Mark as resolving ─────────────────────────────
     await step.run("mark-resolving", async () => {
       const exists = await prisma.githubEvent.findUnique({
-        where: { id: eventId },
-        select: { id: true, status: true },
+        where: {id: eventId},
+        select: {id: true, status: true},
       });
 
       if (!exists) throw new Error(`Event ${eventId} not found in DB`);
@@ -60,21 +77,31 @@ export const resolveGithubEvent = inngest.createFunction(
         throw new Error(`Event ${eventId} already resolved — skipping`);
       }
 
+      // Update event status
       await prisma.githubEvent.update({
-        where: { id: eventId },
-        data: { status: "RESOLVING" },
+        where: {id: eventId},
+        data: {status: "RESOLVING"},
+      });
+
+      // Update job status + startedAt
+      await prisma.resolveJob.updateMany({
+        where: {eventId},
+        data: {
+          status: "FETCHING_CONTEXT",
+          startedAt: new Date(),
+        },
       });
     });
 
     // ── Step 2: Fetch context from GitHub ─────────────────────
     const context = await step.run("fetch-context", async () => {
       const githubEvent = await prisma.githubEvent.findUnique({
-        where: { id: eventId },
+        where: {id: eventId},
         include: {
           repo: true,
           user: {
             include: {
-              accounts: { where: { providerId: "github" } },
+              accounts: {where: {providerId: "github"}},
             },
           },
         },
@@ -83,13 +110,14 @@ export const resolveGithubEvent = inngest.createFunction(
       if (!githubEvent) throw new Error(`Event ${eventId} not found`);
 
       const accessToken = githubEvent.user.accounts[0]?.accessToken;
-      if (!accessToken) throw new Error("No GitHub access token found for user");
+      if (!accessToken)
+        throw new Error("No GitHub access token found for user");
 
-      const octokit = new Octokit({ auth: accessToken });
+      const octokit = new Octokit({auth: accessToken});
       const payload = githubEvent.payload as any;
       const [owner, repoName] = githubEvent.repo.fullName.split("/");
 
-      const files: { path: string; content: string }[] = [];
+      const files: {path: string; content: string}[] = [];
       const skippedFiles: string[] = [];
       let errorContext = "";
 
@@ -101,13 +129,15 @@ export const resolveGithubEvent = inngest.createFunction(
               owner,
               repo: repoName,
               path,
-              ...(ref ? { ref } : {}),
-            })
+              ...(ref ? {ref} : {}),
+            }),
           );
           if ("content" in response.data) {
             files.push({
               path,
-              content: Buffer.from(response.data.content, "base64").toString("utf-8"),
+              content: Buffer.from(response.data.content, "base64").toString(
+                "utf-8",
+              ),
             });
           }
         } catch (err: any) {
@@ -121,22 +151,26 @@ export const resolveGithubEvent = inngest.createFunction(
         if (!sha) throw new Error("No SHA found in CI_FAILURE payload");
 
         const commit = await withRetry(() =>
-          octokit.rest.repos.getCommit({ owner, repo: repoName, ref: sha })
+          octokit.rest.repos.getCommit({owner, repo: repoName, ref: sha}),
         );
 
         console.log(
           "[resolve-event] All files in commit:",
-          commit.data.files?.map((f) => f.filename)
+          commit.data.files?.map((f) => f.filename),
         );
 
         const changedFiles = (commit.data.files ?? [])
-          .filter((f) => f.filename.match(/\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|cs|php|rb)$/))
+          .filter((f) =>
+            f.filename.match(
+              /\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|cs|php|rb)$/,
+            ),
+          )
           .slice(0, 5);
 
-          console.log(
-    "[resolve-event] Matched files:",
-    changedFiles.map((f) => f.filename)
-  );
+        console.log(
+          "[resolve-event] Matched files:",
+          changedFiles.map((f) => f.filename),
+        );
 
         for (const file of changedFiles) {
           await fetchFile(file.filename, sha);
@@ -152,14 +186,15 @@ export const resolveGithubEvent = inngest.createFunction(
 
       if (githubEvent.type === "PR_CONFLICT") {
         const prNumber = payload.pull_request?.number;
-        if (!prNumber) throw new Error("No PR number found in PR_CONFLICT payload");
+        if (!prNumber)
+          throw new Error("No PR number found in PR_CONFLICT payload");
 
         const prFiles = await withRetry(() =>
           octokit.rest.pulls.listFiles({
             owner,
             repo: repoName,
             pull_number: prNumber,
-          })
+          }),
         );
 
         const relevantFiles = prFiles.data
@@ -181,7 +216,8 @@ export const resolveGithubEvent = inngest.createFunction(
         const commits = payload.commits ?? [];
         const latestCommit = commits[commits.length - 1];
 
-        if (!latestCommit) throw new Error("No commits found in CODE_ERROR payload");
+        if (!latestCommit)
+          throw new Error("No commits found in CODE_ERROR payload");
 
         const changedFiles = [
           ...(latestCommit.added ?? []),
@@ -199,12 +235,14 @@ export const resolveGithubEvent = inngest.createFunction(
 
       if (!files.length) {
         throw new Error(
-          `No files could be fetched. Skipped: ${skippedFiles.join(", ") || "none"}`
+          `No files could be fetched. Skipped: ${skippedFiles.join(", ") || "none"}`,
         );
       }
 
       if (skippedFiles.length) {
-        console.warn(`[resolve-event] Skipped files: ${skippedFiles.join(", ")}`);
+        console.warn(
+          `[resolve-event] Skipped files: ${skippedFiles.join(", ")}`,
+        );
       }
 
       return {
@@ -218,6 +256,11 @@ export const resolveGithubEvent = inngest.createFunction(
 
     // ── Step 3: Analyze with Claude ───────────────────────────
     const patch = await step.run("analyze-with-claude", async () => {
+      await prisma.resolveJob.updateMany({
+        where: {eventId},
+        data: {status: "ANALYZING"},
+      });
+
       const filesContent = context.files
         .map((f: any) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
         .join("\n\n");
@@ -276,7 +319,7 @@ export const resolveGithubEvent = inngest.createFunction(
       const message = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 8096,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{role: "user", content: prompt}],
       });
 
       const responseText =
@@ -286,13 +329,13 @@ export const resolveGithubEvent = inngest.createFunction(
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error(
-          `Claude did not return valid JSON. Response: ${responseText.slice(0, 200)}`
+          `Claude did not return valid JSON. Response: ${responseText.slice(0, 200)}`,
         );
       }
 
       let result: {
         explanation: string;
-        files: { path: string; content: string }[];
+        files: {path: string; content: string}[];
         commitMessage: string;
       };
 
@@ -309,7 +352,7 @@ export const resolveGithubEvent = inngest.createFunction(
 
       if (result?.files.length === 0) {
         throw new Error(
-          `Claude could not determine a safe fix: ${result.explanation}`
+          `Claude could not determine a safe fix: ${result.explanation}`,
         );
       }
 
@@ -322,12 +365,17 @@ export const resolveGithubEvent = inngest.createFunction(
 
     // ── Step 4: Create branch + commit + PR ───────────────────
     const prResult = await step.run("create-pr", async () => {
-      const octokit = new Octokit({ auth: context.accessToken });
+      const octokit = new Octokit({auth: context.accessToken});
       const [owner, repoName] = context.repoFullName.split("/");
 
+      // At the start of create-pr step
+      await prisma.resolveJob.updateMany({
+        where: {eventId},
+        data: {status: "CREATING_PR"},
+      });
       // Get default branch
       const repoData = await withRetry(() =>
-        octokit.rest.repos.get({ owner, repo: repoName })
+        octokit.rest.repos.get({owner, repo: repoName}),
       );
       const defaultBranch = repoData.data.default_branch;
 
@@ -336,7 +384,7 @@ export const resolveGithubEvent = inngest.createFunction(
           owner,
           repo: repoName,
           ref: `heads/${defaultBranch}`,
-        })
+        }),
       );
       const baseSha = branchRef.data.object.sha;
       const branchName = `fix/auto-${eventId.slice(0, 8)}`;
@@ -349,12 +397,14 @@ export const resolveGithubEvent = inngest.createFunction(
             repo: repoName,
             ref: `refs/heads/${branchName}`,
             sha: baseSha,
-          })
+          }),
         );
       } catch (err: any) {
         if (err?.status === 422) {
           // Branch already exists from a previous attempt — continue
-          console.warn(`[resolve-event] Branch ${branchName} already exists — continuing`);
+          console.warn(
+            `[resolve-event] Branch ${branchName} already exists — continuing`,
+          );
         } else {
           throw err;
         }
@@ -371,7 +421,7 @@ export const resolveGithubEvent = inngest.createFunction(
               repo: repoName,
               path: file.path,
               ref: branchName,
-            })
+            }),
           );
           if ("sha" in existing.data) {
             currentFileSha = existing.data.sha;
@@ -380,7 +430,7 @@ export const resolveGithubEvent = inngest.createFunction(
           if (err?.status !== 404) {
             // 404 means new file — anything else is a real error
             throw new Error(
-              `Failed to get existing file SHA for ${file.path}: ${err?.message}`
+              `Failed to get existing file SHA for ${file.path}: ${err?.message}`,
             );
           }
         }
@@ -393,8 +443,8 @@ export const resolveGithubEvent = inngest.createFunction(
             message: patch.commitMessage,
             content: Buffer.from(file.content).toString("base64"),
             branch: branchName,
-            ...(currentFileSha ? { sha: currentFileSha } : {}),
-          })
+            ...(currentFileSha ? {sha: currentFileSha} : {}),
+          }),
         );
       }
 
@@ -405,7 +455,7 @@ export const resolveGithubEvent = inngest.createFunction(
           repo: repoName,
           head: `${owner}:${branchName}`,
           state: "open",
-        })
+        }),
       );
 
       if (existingPRs.data.length > 0) {
@@ -446,7 +496,7 @@ export const resolveGithubEvent = inngest.createFunction(
           body: prBody,
           head: branchName,
           base: defaultBranch,
-        })
+        }),
       );
 
       return {
@@ -459,8 +509,19 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 5: Mark resolved in DB ───────────────────────────
     await step.run("mark-resolved", async () => {
       await prisma.githubEvent.update({
-        where: { id: eventId },
-        data: { status: "RESOLVED" },
+        where: {id: eventId},
+        data: {status: "RESOLVED"},
+      });
+
+      // Sync ResolveJob with PR details
+      await prisma.resolveJob.updateMany({
+        where: {eventId},
+        data: {
+          status: "COMPLETED",
+          prUrl: prResult.prUrl,
+          prNumber: prResult.prNumber,
+          completedAt: new Date(),
+        },
       });
     });
 
@@ -470,7 +531,7 @@ export const resolveGithubEvent = inngest.createFunction(
       prUrl: prResult.prUrl,
       prNumber: prResult.prNumber,
     };
-  }
+  },
 );
 
 // ✅ Input validation     — checks eventId exists before any DB call

@@ -147,6 +147,30 @@ function timeAgo(date: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Single source of truth — derive one clear state
+function getCardState(event: GithubEvent) {
+  // Job completed = resolved regardless of event status
+  if (event.resolveJob?.status === "COMPLETED") return "resolved";
+  if (event.status === "RESOLVED") return "resolved";
+
+  // Job failed
+  if (event.resolveJob?.status === "FAILED") return "failed";
+  if (event.status === "FAILED") return "failed";
+
+  // Actively running
+  if (
+    event.status === "RESOLVING" ||
+    (event.resolveJob &&
+      ["QUEUED", "FETCHING_CONTEXT", "ANALYZING", "PATCHING", "CREATING_PR"].includes(
+        event.resolveJob.status
+      ))
+  )
+    return "resolving";
+
+  // Default — waiting
+  return "pending";
+}
+
 // ── Event Card ────────────────────────────────────────────────
 function EventCard({
   event,
@@ -161,11 +185,12 @@ function EventCard({
 }) {
   const config = eventTypeConfig[event.type];
   const job = event.resolveJob;
-  const isResolving =
-    event.status === "RESOLVING" ||
-    (job && !["COMPLETED", "FAILED", "CANCELLED"].includes(job.status));
-  const isResolved = event.status === "RESOLVED" || job?.status === "COMPLETED";
-  const isFailed = job?.status === "FAILED";
+  const cardState = getCardState(event);
+  
+  const isResolving = cardState === "resolving";
+  const isResolved = cardState === "resolved";
+  const isFailed = cardState === "failed";
+  const isPending = cardState === "pending";
 
   return (
     <div
