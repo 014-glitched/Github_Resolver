@@ -1,7 +1,7 @@
-import {inngest} from "@/src/inngest/client";
+import { inngest } from "@/src/inngest/client";
 import prisma from "../prisma";
 import Anthropic from "@anthropic-ai/sdk";
-import {Octokit} from "octokit";
+import { Octokit } from "octokit";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -35,17 +35,17 @@ export const resolveGithubEvent = inngest.createFunction(
     id: "resolve-github-event",
     name: "Resolve GitHub Event",
     retries: 2,
-    onFailure: async ({error, event}) => {
+    onFailure: async ({ error, event }) => {
       // Access original event data through event.data.event.data
-      const {eventId} = event.data.event.data;
+      const { eventId } = event.data.event.data;
 
       await prisma.githubEvent.updateMany({
-        where: {id: eventId},
-        data: {status: "FAILED"},
+        where: { id: eventId },
+        data: { status: "FAILED" },
       });
 
       await prisma.resolveJob.updateMany({
-        where: {eventId},
+        where: { eventId },
         data: {
           status: "FAILED",
           errorMsg: error.message,
@@ -54,9 +54,9 @@ export const resolveGithubEvent = inngest.createFunction(
       });
     },
   },
-  {event: "github/event.resolve"},
-  async ({event, step}) => {
-    const {eventId} = event.data;
+  { event: "github/event.resolve" },
+  async ({ event, step }) => {
+    const { eventId } = event.data;
 
     // ── Validate input ────────────────────────────────────────
     if (!eventId || typeof eventId !== "string") {
@@ -66,8 +66,8 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 1: Mark as resolving ─────────────────────────────
     await step.run("mark-resolving", async () => {
       const exists = await prisma.githubEvent.findUnique({
-        where: {id: eventId},
-        select: {id: true, status: true},
+        where: { id: eventId },
+        select: { id: true, status: true },
       });
 
       if (!exists) throw new Error(`Event ${eventId} not found in DB`);
@@ -79,13 +79,13 @@ export const resolveGithubEvent = inngest.createFunction(
 
       // Update event status
       await prisma.githubEvent.update({
-        where: {id: eventId},
-        data: {status: "RESOLVING"},
+        where: { id: eventId },
+        data: { status: "RESOLVING" },
       });
 
       // Update job status + startedAt
       await prisma.resolveJob.updateMany({
-        where: {eventId},
+        where: { eventId },
         data: {
           status: "FETCHING_CONTEXT",
           startedAt: new Date(),
@@ -96,12 +96,12 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 2: Fetch context from GitHub ─────────────────────
     const context = await step.run("fetch-context", async () => {
       const githubEvent = await prisma.githubEvent.findUnique({
-        where: {id: eventId},
+        where: { id: eventId },
         include: {
           repo: true,
           user: {
             include: {
-              accounts: {where: {providerId: "github"}},
+              accounts: { where: { providerId: "github" } },
             },
           },
         },
@@ -113,26 +113,29 @@ export const resolveGithubEvent = inngest.createFunction(
       if (!accessToken)
         throw new Error("No GitHub access token found for user");
 
-      const octokit = new Octokit({auth: accessToken});
+      const octokit = new Octokit({ auth: accessToken });
       const payload = githubEvent.payload as any;
       const [owner, repoName] = githubEvent.repo.fullName.split("/");
 
-      const files: {path: string; content: string}[] = [];
+      const files: { path: string; content: string }[] = [];
+      console.log("FILEKSHVKV", files);
       const skippedFiles: string[] = [];
       let errorContext = "";
 
       // Helper to fetch a single file safely
       async function fetchFile(path: string, ref?: string) {
+        console.log("[fetchFile] Attempting:", path, "ref:", ref ?? "none");
         try {
           const response = await withRetry(() =>
             octokit.rest.repos.getContent({
               owner,
               repo: repoName,
               path,
-              ...(ref ? {ref} : {}),
+              ...(ref ? { ref } : {}),
             }),
           );
           if ("content" in response.data) {
+            console.log("[fetchFile] Success:", path);
             files.push({
               path,
               content: Buffer.from(response.data.content, "base64").toString(
@@ -142,6 +145,14 @@ export const resolveGithubEvent = inngest.createFunction(
           }
         } catch (err: any) {
           // Log skipped files instead of silently ignoring
+          console.log(
+            "[fetchFile] Failed:",
+            path,
+            "Error:",
+            err?.message,
+            "Status:",
+            err?.status,
+          );
           skippedFiles.push(`${path} (${err?.message ?? "unknown error"})`);
         }
       }
@@ -151,12 +162,14 @@ export const resolveGithubEvent = inngest.createFunction(
         if (!sha) throw new Error("No SHA found in CI_FAILURE payload");
 
         const commit = await withRetry(() =>
-          octokit.rest.repos.getCommit({owner, repo: repoName, ref: sha}),
+          octokit.rest.repos.getCommit({ owner, repo: repoName, ref: sha }),
         );
 
         console.log(
-          "[resolve-event] All files in commit:",
-          commit.data.files?.map((f) => f.filename),
+          "[resolve-event] SHA:",
+          sha,
+          "\n[resolve-event] All files:",
+          commit.data.files?.map((f) => `${f.filename} (${f.status})`),
         );
 
         const changedFiles = (commit.data.files ?? [])
@@ -171,7 +184,7 @@ export const resolveGithubEvent = inngest.createFunction(
           "[resolve-event] Matched files:",
           changedFiles.map((f) => f.filename),
         );
-
+        console.log("[resolve-event] changedFiles to fetch:", changedFiles);
         for (const file of changedFiles) {
           await fetchFile(file.filename, sha);
         }
@@ -198,7 +211,11 @@ export const resolveGithubEvent = inngest.createFunction(
         );
 
         const relevantFiles = prFiles.data
-          .filter((f) => f.filename.match(/\.(ts|tsx|js|jsx|py|go|rs)$/))
+          .filter((f) =>
+            f.filename.match(
+              /\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|cs|php|rb|md|json|yaml|yml|env|sh)$/,
+            ),
+          )
           .slice(0, 5);
 
         for (const file of relevantFiles) {
@@ -219,18 +236,38 @@ export const resolveGithubEvent = inngest.createFunction(
         if (!latestCommit)
           throw new Error("No commits found in CODE_ERROR payload");
 
+        const commitSha = latestCommit.id ?? latestCommit.sha;
+        if (!commitSha)
+          throw new Error("No commit SHA found in CODE_ERROR payload");
+
+        console.log("[resolve-event] CODE_ERROR SHA:", commitSha);
+
         const changedFiles = [
           ...(latestCommit.added ?? []),
           ...(latestCommit.modified ?? []),
         ]
-          .filter((f: string) => f.match(/\.(ts|tsx|js|jsx|py|go|rs)$/))
+          .filter((f: string) =>
+            f.match(
+              /\.(ts|tsx|js|jsx|py|go|rs|java|cpp|c|cs|php|rb|md|json|yaml|yml|env|sh)$/,
+            ),
+          )
           .slice(0, 5);
 
         for (const filePath of changedFiles) {
-          await fetchFile(filePath);
+          await fetchFile(filePath, commitSha);
         }
 
-        errorContext = `Error in push: ${latestCommit.message}`;
+        console.log("[resolve-event] CODE_ERROR files:", [
+          ...(latestCommit.added ?? []),
+          ...(latestCommit.modified ?? []),
+        ]);
+
+        errorContext = [
+          `Error in push: ${latestCommit.message}`,
+          `Commit SHA: ${commitSha}`,
+          `Author: ${latestCommit.author?.name ?? "unknown"}`,
+          `Timestamp: ${latestCommit.timestamp ?? "unknown"}`,
+        ].join("\n");
       }
 
       if (!files.length) {
@@ -257,8 +294,8 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 3: Analyze with Claude ───────────────────────────
     const patch = await step.run("analyze-with-claude", async () => {
       await prisma.resolveJob.updateMany({
-        where: {eventId},
-        data: {status: "ANALYZING"},
+        where: { eventId },
+        data: { status: "ANALYZING" },
       });
 
       const filesContent = context.files
@@ -319,7 +356,7 @@ export const resolveGithubEvent = inngest.createFunction(
       const message = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 8096,
-        messages: [{role: "user", content: prompt}],
+        messages: [{ role: "user", content: prompt }],
       });
 
       const responseText =
@@ -335,7 +372,7 @@ export const resolveGithubEvent = inngest.createFunction(
 
       let result: {
         explanation: string;
-        files: {path: string; content: string}[];
+        files: { path: string; content: string }[];
         commitMessage: string;
       };
 
@@ -365,17 +402,17 @@ export const resolveGithubEvent = inngest.createFunction(
 
     // ── Step 4: Create branch + commit + PR ───────────────────
     const prResult = await step.run("create-pr", async () => {
-      const octokit = new Octokit({auth: context.accessToken});
+      const octokit = new Octokit({ auth: context.accessToken });
       const [owner, repoName] = context.repoFullName.split("/");
 
       // At the start of create-pr step
       await prisma.resolveJob.updateMany({
-        where: {eventId},
-        data: {status: "CREATING_PR"},
+        where: { eventId },
+        data: { status: "CREATING_PR" },
       });
       // Get default branch
       const repoData = await withRetry(() =>
-        octokit.rest.repos.get({owner, repo: repoName}),
+        octokit.rest.repos.get({ owner, repo: repoName }),
       );
       const defaultBranch = repoData.data.default_branch;
 
@@ -443,7 +480,7 @@ export const resolveGithubEvent = inngest.createFunction(
             message: patch.commitMessage,
             content: Buffer.from(file.content).toString("base64"),
             branch: branchName,
-            ...(currentFileSha ? {sha: currentFileSha} : {}),
+            ...(currentFileSha ? { sha: currentFileSha } : {}),
           }),
         );
       }
@@ -509,13 +546,13 @@ export const resolveGithubEvent = inngest.createFunction(
     // ── Step 5: Mark resolved in DB ───────────────────────────
     await step.run("mark-resolved", async () => {
       await prisma.githubEvent.update({
-        where: {id: eventId},
-        data: {status: "RESOLVED"},
+        where: { id: eventId },
+        data: { status: "RESOLVED" },
       });
 
       // Sync ResolveJob with PR details
       await prisma.resolveJob.updateMany({
-        where: {eventId},
+        where: { eventId },
         data: {
           status: "COMPLETED",
           prUrl: prResult.prUrl,
