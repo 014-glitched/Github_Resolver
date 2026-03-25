@@ -14,9 +14,9 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen w-full bg-[#0A0A0A] overflow-hidden">
+      <div className="flex min-h-screen w-full overflow-hidden bg-background">
         <AppSidebar user={session.user} />
-        <main className="flex-1 overflow-y-auto bg-[#0A0A0A] scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#1E1E1E]">
+        <main className="flex-1 overflow-y-auto">
           {children}
         </main>
       </div>

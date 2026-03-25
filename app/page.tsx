@@ -1,65 +1,120 @@
-import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight, ShieldCheck, Sparkles, Workflow } from "lucide-react";
+
+import { BrandMark } from "@/components/brand-mark";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="relative min-h-screen overflow-hidden">
+      <div className="hero-surface absolute inset-0" />
+      <div className="grid-surface absolute inset-0 opacity-30" />
+
+      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-8 lg:px-12">
+        <header className="flex items-center justify-between">
+          <BrandMark compact />
+          <Button asChild variant="ghost">
+            <Link href="/login">Sign in</Link>
+          </Button>
+        </header>
+
+        <section className="flex flex-1 flex-col justify-center py-16 lg:py-24">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-center">
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-primary/80">
+                  Modern GitHub Ops
+                </p>
+                <div className="space-y-4">
+                  <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
+                    Resolve flaky CI, merge conflicts, and code regressions from one calm dashboard.
+                  </h1>
+                  <p className="max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
+                    GitHubResolver watches your repositories, surfaces failures with context, and helps turn broken flows into review-ready pull requests.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button asChild size="lg" className="shadow-md">
+                  <Link href="/login">
+                    Continue with GitHub
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline">
+                  <Link href="/dashboard">View dashboard</Link>
+                </Button>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  {
+                    icon: Workflow,
+                    title: "Continuous monitoring",
+                    body: "Track repository health and issue flow in one place.",
+                  },
+                  {
+                    icon: Sparkles,
+                    title: "AI-assisted remediation",
+                    body: "Kick off fixes without leaving your operational view.",
+                  },
+                  {
+                    icon: ShieldCheck,
+                    title: "Review-friendly output",
+                    body: "Keep action states, PRs, and ownership visible to the team.",
+                  },
+                ].map(({ icon: Icon, title, body }) => (
+                  <Card key={title} className="bg-card/80">
+                    <CardContent className="space-y-3 p-5">
+                      <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Icon className="size-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-base font-semibold">{title}</p>
+                        <p className="text-sm leading-6 text-muted-foreground">{body}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            <Card className="border-border/80 bg-card/90 shadow-md">
+              <CardContent className="space-y-6 p-6 sm:p-8">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Operational snapshot
+                  </p>
+                  <div className="space-y-3">
+                    {[
+                      { label: "Issues detected", value: "18", tone: "text-destructive" },
+                      { label: "Auto-resolved today", value: "11", tone: "text-success" },
+                      { label: "PRs ready for review", value: "7", tone: "text-info" },
+                    ].map((metric) => (
+                      <div
+                        key={metric.label}
+                        className="flex items-center justify-between rounded-lg border border-border/70 bg-background/80 px-4 py-3"
+                      >
+                        <span className="text-sm text-muted-foreground">{metric.label}</span>
+                        <span className={`text-lg font-semibold ${metric.tone}`}>{metric.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-primary/20 bg-primary/10 p-5">
+                  <p className="text-sm font-semibold text-foreground">Built for focused engineering teams</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    Stripe, Vercel, and Linear-inspired clarity with an app frame designed for fast scanning, clean actions, and predictable states.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
