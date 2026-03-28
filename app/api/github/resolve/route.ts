@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { eventId } = await req.json();
+  const { eventId, strategy, customBranch } = await req.json();
 
   if (!eventId) {
     return Response.json({ error: "Missing eventId" }, { status: 400 });
@@ -52,6 +52,8 @@ export async function POST(req: Request) {
       data: {
         eventId,
         userId: session.user.id,
+        strategy: strategy ?? "new",
+        customBranch,
       },
     });
   } catch (err: any) {

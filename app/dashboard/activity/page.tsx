@@ -2,20 +2,38 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import {
+  Activity,
+  AlertCircle,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  LoaderCircle,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  XCircle,
+} from "lucide-react";
+
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import { SectionCard } from "@/components/section-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// ── Types
 type EventStatus =
   | "PENDING"
   | "RESOLVING"
@@ -36,7 +54,7 @@ type ActivityEvent = {
   title: string;
   description: string | null;
   status: EventStatus;
-  payload: any;
+  payload: unknown;
   createdAt: string;
   repo: { name: string; fullName: string };
   resolveJob: {
@@ -73,13 +91,14 @@ type ActivityResponse = {
 async function fetchActivity(
   status: string,
   search: string,
-  page: number
+  page: number,
 ): Promise<ActivityResponse> {
   const params = new URLSearchParams({
     status,
     search,
     page: String(page),
   });
+
   const res = await fetch(`/api/github/activity?${params}`);
   if (!res.ok) throw new Error("Failed to fetch activity");
   return res.json();
@@ -88,27 +107,32 @@ async function fetchActivity(
 // ── Helpers
 const eventTypeConfig: Record<
   EventType,
-  { label: string; color: string }
+  { label: string; badgeClassName: string; iconClassName: string }
 > = {
   CI_FAILURE: {
     label: "CI Failed",
-    color: "border-red-500/20 text-red-400",
+    badgeClassName: "border-destructive/20 bg-destructive/10 text-destructive",
+    iconClassName: "text-destructive",
   },
   PR_CONFLICT: {
     label: "Merge Conflict",
-    color: "border-yellow-500/20 text-yellow-400",
+    badgeClassName: "border-warning/20 bg-warning/10 text-warning",
+    iconClassName: "text-warning",
   },
   CODE_ERROR: {
     label: "Code Error",
-    color: "border-red-500/20 text-red-400",
+    badgeClassName: "border-destructive/20 bg-destructive/10 text-destructive",
+    iconClassName: "text-destructive",
   },
   MERGE_ERROR: {
     label: "Merge Error",
-    color: "border-yellow-500/20 text-yellow-400",
+    badgeClassName: "border-warning/20 bg-warning/10 text-warning",
+    iconClassName: "text-warning",
   },
   PR_REVIEW_REQUESTED: {
     label: "Review Requested",
-    color: "border-blue-500/20 text-blue-400",
+    badgeClassName: "border-info/20 bg-info/10 text-info",
+    iconClassName: "text-info",
   },
 };
 
@@ -124,6 +148,7 @@ function timeAgo(date: string) {
 
 function groupByDate(events: ActivityEvent[]) {
   const groups: Record<string, ActivityEvent[]> = {};
+
   events.forEach((event) => {
     const date = new Date(event.createdAt);
     const now = new Date();
@@ -144,6 +169,7 @@ function groupByDate(events: ActivityEvent[]) {
     if (!groups[label]) groups[label] = [];
     groups[label].push(event);
   });
+
   return groups;
 }
 
@@ -151,57 +177,131 @@ function groupByDate(events: ActivityEvent[]) {
 function StatusIcon({ status }: { status: EventStatus }) {
   if (status === "RESOLVED") {
     return (
-      <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-        <svg
-          className="w-3.5 h-3.5 text-emerald-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M5 13l4 4L19 7"
-          />
-        </svg>
+      <div className="flex size-9 items-center justify-center rounded-full border border-success/20 bg-success/10 text-success">
+        <Check className="size-4" />
       </div>
     );
   }
+
   if (status === "FAILED") {
     return (
-      <div className="w-7 h-7 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
-        <svg
-          className="w-3.5 h-3.5 text-red-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </svg>
+      <div className="flex size-9 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive">
+        <XCircle className="size-4" />
       </div>
     );
   }
+
   if (status === "RESOLVING") {
     return (
-      <div className="w-7 h-7 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-        <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse" />
+      <div className="flex size-9 items-center justify-center rounded-full border border-info/20 bg-info/10 text-info">
+        <LoaderCircle className="size-4 animate-spin" />
       </div>
     );
   }
+
   return (
-    <div className="w-7 h-7 rounded-full bg-white/5 border border-[#333] flex items-center justify-center shrink-0">
-      <div className="w-2 h-2 rounded-full bg-[#555]" />
+    <div className="flex size-9 items-center justify-center rounded-full border border-border/70 bg-muted/30 text-muted-foreground">
+      <Clock3 className="size-4" />
     </div>
   );
 }
 
-// ── Detail Modal ──────────────────────────────────────────────
+function ActivityStats({
+  stats,
+}: {
+  stats: ActivityResponse["stats"];
+}) {
+  const cards = [
+    {
+      label: "Total events",
+      value: stats.total,
+      description: "All tracked activity",
+      icon: Activity,
+      tone: "text-foreground",
+      surface: "bg-muted/40",
+    },
+    {
+      label: "Resolved",
+      value: stats.resolved,
+      description: "Completed successfully",
+      icon: CheckCircle2,
+      tone: "text-success",
+      surface: "bg-success/10",
+    },
+    {
+      label: "Failed",
+      value: stats.failed,
+      description: "Need follow-up",
+      icon: ShieldAlert,
+      tone: "text-destructive",
+      surface: "bg-destructive/10",
+    },
+    {
+      label: "Success rate",
+      value: `${stats.successRate}%`,
+      description: stats.mostActiveRepo
+        ? `Most active: ${stats.mostActiveRepo}`
+        : "No dominant repository yet",
+      icon: Sparkles,
+      tone: "text-info",
+      surface: "bg-info/10",
+    },
+  ] as const;
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {cards.map(({ label, value, description, icon: Icon, tone, surface }) => (
+        <Card key={label} className="bg-card/90">
+          <CardContent className="flex items-start justify-between gap-4 p-6">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-muted-foreground">{label}</p>
+              <p className={`text-3xl font-semibold tracking-tight ${tone}`}>{value}</p>
+              <p className="text-sm text-muted-foreground">{description}</p>
+            </div>
+            <div className={`flex size-11 items-center justify-center rounded-xl ${surface} ${tone}`}>
+              <Icon className="size-5" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ActivityLoading() {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((item) => (
+          <Card key={item}>
+            <CardContent className="space-y-3 p-6">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-4 w-36" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <SectionCard title="Event timeline" description="Loading activity history...">
+        <div className="space-y-3">
+          {[0, 1, 2, 3, 4].map((item) => (
+            <div key={item} className="rounded-xl border border-border/70 p-4">
+              <div className="flex items-center gap-4">
+                <Skeleton className="size-9 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-2/3" />
+                </div>
+                <Skeleton className="h-4 w-12" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
 function DetailModal({
   event,
   open,
@@ -219,151 +319,129 @@ function DetailModal({
   const duration =
     job?.startedAt && job?.completedAt
       ? Math.round(
-          (new Date(job.completedAt).getTime() -
-            new Date(job.startedAt).getTime()) /
-            1000
+          (new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime()) / 1000,
         )
       : null;
 
+  const summaryItems = [
+    { label: "Repository", value: event.repo.fullName },
+    { label: "Status", value: event.status },
+    {
+      label: "Detected",
+      value: new Date(event.createdAt).toLocaleString(),
+    },
+    {
+      label: "Duration",
+      value: duration ? `${duration}s` : "Not available",
+    },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="bg-[#111] border border-[#222] text-white max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-center gap-3 mb-1">
+      <DialogContent className="max-h-screen overflow-y-auto border-border/70 bg-card text-card-foreground sm:max-w-2xl">
+        <DialogHeader className="space-y-4">
+          <div className="flex items-start gap-4">
             <StatusIcon status={event.status} />
-            <div>
-              <Badge
-                variant="outline"
-                className={`text-[10px] px-2 py-0 h-4 mb-1.5 ${config.color}`}
-              >
+            <div className="space-y-2">
+              <Badge variant="outline" className={`h-6 rounded-full px-2.5 text-xs ${config.badgeClassName}`}>
                 {config.label}
               </Badge>
-              <DialogTitle className="text-[14px] font-medium text-white/85 leading-snug">
+              <DialogTitle className="text-left text-lg font-semibold leading-7">
                 {event.title}
               </DialogTitle>
+              <DialogDescription className="text-left text-sm text-muted-foreground">
+                Detailed timeline, repository context, and resolver output for this event.
+              </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 mt-2">
-          {/* Meta grid */}
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "Repository", value: event.repo.fullName },
-              { label: "Status", value: event.status },
-              {
-                label: "Detected",
-                value: new Date(event.createdAt).toLocaleString(),
-              },
-              {
-                label: "Duration",
-                value: duration ? `${duration}s` : "—",
-              },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="p-3 rounded-lg bg-white/3 border border-[#1A1A1A]"
-              >
-                <p className="text-[10px] text-[#555] uppercase tracking-widest mb-1">
+        <div className="space-y-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {summaryItems.map((item) => (
+              <div key={item.label} className="rounded-lg border border-border/70 bg-muted/20 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   {item.label}
                 </p>
-                <p className="text-[12px] text-[#C4C4C4] truncate">
-                  {item.value}
-                </p>
+                <p className="mt-2 text-sm text-foreground">{item.value}</p>
               </div>
             ))}
           </div>
 
-          {/* Description */}
-          {event.description && (
-            <div className="p-3 rounded-lg bg-white/3 border border-[#1A1A1A]">
-              <p className="text-[10px] text-[#555] uppercase tracking-widest mb-2">
-                Issue Description
+          {event.description ? (
+            <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Issue description
               </p>
-              <p className="text-[12px] text-[#888] leading-relaxed">
-                {event.description}
-              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{event.description}</p>
             </div>
-          )}
+          ) : null}
 
-          {/* PR link */}
-          {job?.prUrl && (
-            <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/15">
-              <p className="text-[10px] text-emerald-400/70 uppercase tracking-widest mb-2">
-                Pull Request Created
+          {job?.prUrl ? (
+            <div className="rounded-lg border border-success/20 bg-success/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-success/80">
+                Pull request created
               </p>
               <a
                 href={job.prUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[13px] text-emerald-400 hover:text-emerald-300 underline underline-offset-2 transition-colors"
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-success underline-offset-4 hover:underline"
               >
-                View PR #{job.prNumber} on GitHub →
+                View PR #{job.prNumber} on GitHub
+                <ArrowUpRight className="size-4" />
               </a>
             </div>
-          )}
+          ) : null}
 
-          {/* Error */}
-          {job?.errorMsg && (
-            <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/15">
-              <p className="text-[10px] text-red-400/70 uppercase tracking-widest mb-2">
-                Error Details
+          {job?.errorMsg ? (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-destructive/80">
+                Error details
               </p>
-              <p className="text-[12px] text-red-400/80 leading-relaxed font-mono">
-                {job.errorMsg}
-              </p>
+              <p className="mt-2 font-mono text-sm leading-6 text-destructive">{job.errorMsg}</p>
             </div>
-          )}
+          ) : null}
 
-          {/* Job Timeline */}
-          {job && (
-            <div className="p-3 rounded-lg bg-white/3 border border-[#1A1A1A]">
-              <p className="text-[10px] text-[#555] uppercase tracking-widest mb-3">
-                Job Timeline
+          {job ? (
+            <div className="rounded-lg border border-border/70 bg-muted/20 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Job timeline
               </p>
-              <div className="flex flex-col gap-2">
+              <div className="mt-4 space-y-3">
                 {[
-                  { label: "Job Queued", time: event.createdAt, done: true },
+                  { label: "Job queued", time: event.createdAt, done: true },
                   { label: "Started", time: job.startedAt, done: !!job.startedAt },
                   { label: "Completed", time: job.completedAt, done: !!job.completedAt },
                 ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-2">
+                  <div key={item.label} className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
                       <div
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          item.done ? "bg-emerald-500" : "bg-[#333]"
+                        className={`size-2 rounded-full ${
+                          item.done ? "bg-success" : "bg-muted-foreground"
                         }`}
                       />
-                      <span
-                        className={`text-[12px] ${
-                          item.done ? "text-[#888]" : "text-[#444]"
-                        }`}
-                      >
+                      <span className={item.done ? "text-sm text-foreground" : "text-sm text-muted-foreground"}>
                         {item.label}
                       </span>
                     </div>
-                    <span className="text-[11px] text-[#444]">
-                      {item.time
-                        ? new Date(item.time).toLocaleTimeString()
-                        : "—"}
+                    <span className="text-sm text-muted-foreground">
+                      {item.time ? new Date(item.time).toLocaleTimeString() : "Not available"}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
-          {/* Repo link */}
           <a
             href={`https://github.com/${event.repo.fullName}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[12px] text-[#444] hover:text-[#888] transition-colors text-center"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
-            View repository on GitHub →
+            View repository on GitHub
+            <ArrowUpRight className="size-4" />
           </a>
         </div>
       </DialogContent>
@@ -371,14 +449,11 @@ function DetailModal({
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────
 export default function ActivityPage() {
   const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(
-    null
-  );
+  const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["activity", status, search, page],
@@ -390,247 +465,169 @@ export default function ActivityPage() {
   const groupOrder = ["Today", "Yesterday", "This Week", "Older"];
 
   return (
-    <div className="p-8 min-h-screen bg-[#0A0A0A]">
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
+      <PageHeader
+        eyebrow="Historical activity"
+        title="Activity"
+        description="Review the full event history, inspect resolver output, and follow issue outcomes across connected repositories."
+        action={
+          <Badge variant="secondary" className="h-8 rounded-full bg-primary/10 px-3 text-sm font-medium text-primary">
+            <Activity className="size-4" />
+            Timeline view
+          </Badge>
+        }
+      />
 
-      {/* Header */}
-      <div className="mb-8">
-        <h2 className="text-[22px] font-semibold text-white/90 tracking-tight">
-          Activity
-        </h2>
-        <p className="text-[13px] text-[#555] mt-1">
-          Full history of all GitHub events and resolutions.
-        </p>
-      </div>
+      {isLoading ? <ActivityLoading /> : null}
 
-      {/* Stats */}
-      {isLoading ? (
-        <div className="grid grid-cols-4 gap-3 mb-8">
-          {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-xl bg-[#111]" />
-          ))}
-        </div>
-      ) : data?.stats ? (
-        <div className="grid grid-cols-4 gap-3 mb-8">
-          {[
-            {
-              label: "Total Events",
-              value: data.stats.total,
-              color: "text-white/80",
-            },
-            {
-              label: "Resolved",
-              value: data.stats.resolved,
-              color: "text-emerald-400",
-            },
-            {
-              label: "Failed",
-              value: data.stats.failed,
-              color: "text-red-400",
-            },
-            {
-              label: "Success Rate",
-              value: `${data.stats.successRate}%`,
-              color: "text-blue-400",
-            },
-          ].map((stat) => (
-            <Card
-              key={stat.label}
-              className="border-[#222] bg-[#111] rounded-xl"
-            >
-              <CardHeader className="pb-1 pt-4 px-4">
-                <CardTitle className="text-[11px] text-[#555] uppercase tracking-widest font-normal">
-                  {stat.label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                <p className={`text-2xl font-semibold ${stat.color}`}>
-                  {stat.value}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+      {isError ? (
+        <EmptyState
+          icon={<AlertCircle className="size-5" />}
+          title="Failed to load activity"
+          description="The activity history could not be loaded right now. Try refreshing or checking the GitHub connection."
+          className="border-destructive/20 bg-destructive/5"
+        />
       ) : null}
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <Tabs
-          value={status}
-          onValueChange={(val) => {
-            setStatus(val);
-            setPage(1);
-          }}
-        >
-          <TabsList className="bg-[#111] border border-[#222] h-9">
-            {["ALL", "RESOLVED", "FAILED", "PENDING", "RESOLVING"].map(
-              (s) => (
-                <TabsTrigger
-                  key={s}
-                  value={s}
-                  className="text-[11px] data-[state=active]:bg-white/8 data-[state=active]:text-white text-[#555]"
-                >
-                  {s === "ALL"
-                    ? "All"
-                    : s.charAt(0) + s.slice(1).toLowerCase()}
-                </TabsTrigger>
-              )
-            )}
-          </TabsList>
-        </Tabs>
+      {!isLoading && !isError && data ? (
+        <>
+          <ActivityStats stats={data.stats} />
 
-        <Input
-          placeholder="Search by title or repo..."
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-          className="flex-1 min-w-48 h-9 bg-[#111] border-[#222] text-[12px] text-[#C4C4C4] placeholder:text-[#444] focus-visible:ring-0 focus-visible:border-[#333]"
-        />
-      </div>
+          <SectionCard title="Filters" description="Search and narrow the event timeline by status.">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <Tabs
+                value={status}
+                onValueChange={(value) => {
+                  setStatus(value);
+                  setPage(1);
+                }}
+              >
+                <TabsList variant="line" className="flex-wrap gap-2 rounded-xl border border-border/70 bg-card/70 p-1">
+                  {["ALL", "RESOLVED", "FAILED", "PENDING", "RESOLVING"].map((item) => (
+                    <TabsTrigger key={item} value={item} className="rounded-lg px-3 text-sm">
+                      {item === "ALL" ? "All" : item.charAt(0) + item.slice(1).toLowerCase()}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
 
-      {/* Loading skeletons */}
-      {isLoading && (
-        <div className="flex flex-col gap-2">
-          {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-16 rounded-xl bg-[#111]" />
-          ))}
-        </div>
-      )}
-
-      {/* Error */}
-      {isError && (
-        <div className="border border-red-500/20 rounded-xl p-6 bg-red-500/5 text-center">
-          <p className="text-[13px] text-red-400">
-            Failed to load activity.
-          </p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && !isError && data?.events.length === 0 && (
-        <div className="border border-dashed border-[#222] rounded-xl p-16 text-center">
-          <p className="text-[13px] text-[#444] font-medium">
-            No activity found
-          </p>
-          <p className="text-[12px] text-[#333] mt-1">
-            {search || status !== "ALL"
-              ? "Try adjusting your filters"
-              : "Events will appear here once GitHub issues are detected"}
-          </p>
-        </div>
-      )}
-
-      {/* Event list */}
-      {!isLoading && !isError && data && data.events.length > 0 && (
-        <div className="flex flex-col gap-6">
-          {groupOrder.map((group) => {
-            if (!groups[group]) return null;
-            return (
-              <div key={group}>
-                <p className="text-[11px] text-[#444] uppercase tracking-widest mb-3">
-                  {group}
-                </p>
-                <div className="flex flex-col gap-2">
-                  {groups[group].map((event) => {
-                    const config = eventTypeConfig[event.type];
-                    return (
-                      <div
-                        key={event.id}
-                        onClick={() => setSelectedEvent(event)}
-                        className="border border-[#1A1A1A] rounded-xl p-4 bg-[#111] hover:border-[#333] hover:bg-[#131313] transition-all cursor-pointer"
-                      >
-                        <div className="flex items-center gap-3">
-                          <StatusIcon status={event.status} />
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] px-1.5 py-0 h-4 shrink-0 ${config.color}`}
-                              >
-                                {config.label}
-                              </Badge>
-                              <span className="text-[13px] text-white/75 truncate font-medium">
-                                {event.title}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-[11px] text-[#444]">
-                                {event.repo.fullName}
-                              </span>
-                              {event.resolveJob?.prNumber && (
-                                <span className="text-[11px] text-emerald-500/60">
-                                  PR #{event.resolveJob.prNumber}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className="text-[11px] text-[#444]">
-                              {timeAgo(event.createdAt)}
-                            </span>
-                            <svg
-                              className="w-4 h-4 text-[#333]"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={1.5}
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M8.25 4.5l7.5 7.5-7.5 7.5"
-                              />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Pagination */}
-          {data.pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between pt-4 border-t border-[#1A1A1A]">
-              <p className="text-[12px] text-[#444]">
-                Showing {(page - 1) * 20 + 1}–
-                {Math.min(page * 20, data.pagination.total)} of{" "}
-                {data.pagination.total} events
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!data.pagination.hasPrev}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="h-8 text-[12px] border-[#333] bg-transparent text-[#666] hover:text-white hover:border-[#444] disabled:opacity-30"
-                >
-                  Previous
-                </Button>
-                <span className="text-[12px] text-[#444] px-2">
-                  {page} / {data.pagination.totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!data.pagination.hasNext}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="h-8 text-[12px] border-[#333] bg-transparent text-[#666] hover:text-white hover:border-[#444] disabled:opacity-30"
-                >
-                  Next
-                </Button>
+              <div className="relative w-full lg:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search by title or repository"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  className="pl-10"
+                />
               </div>
             </div>
-          )}
-        </div>
-      )}
+          </SectionCard>
 
-      {/* Detail Modal */}
+          {data.events.length === 0 ? (
+            <EmptyState
+              icon={<Clock3 className="size-5" />}
+              title="No activity found"
+              description={
+                search || status !== "ALL"
+                  ? "Try adjusting your filters to see more events."
+                  : "Events will appear here once GitHub activity starts flowing through the resolver."
+              }
+            />
+          ) : (
+            <SectionCard title="Event timeline" description="Grouped by recency so you can scan the latest activity first.">
+              <div className="space-y-8">
+                {groupOrder.map((group) => {
+                  if (!groups[group]) return null;
+
+                  return (
+                    <div key={group} className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        {group}
+                      </p>
+                      <div className="space-y-3">
+                        {groups[group].map((event) => {
+                          const config = eventTypeConfig[event.type];
+
+                          return (
+                            <button
+                              key={event.id}
+                              type="button"
+                              onClick={() => setSelectedEvent(event)}
+                              className="flex w-full items-center gap-4 rounded-xl border border-border/70 bg-card/90 p-4 text-left shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
+                            >
+                              <StatusIcon status={event.status} />
+
+                              <div className="min-w-0 flex-1 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`h-6 rounded-full px-2.5 text-xs font-medium ${config.badgeClassName}`}
+                                  >
+                                    {config.label}
+                                  </Badge>
+                                  <span className="truncate text-sm font-semibold text-foreground">
+                                    {event.title}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                                  <span>{event.repo.fullName}</span>
+                                  {event.resolveJob?.prNumber ? (
+                                    <span className="text-success">PR #{event.resolveJob.prNumber}</span>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="flex shrink-0 items-center gap-3 text-sm text-muted-foreground">
+                                <span>{timeAgo(event.createdAt)}</span>
+                                <ChevronRight className="size-4" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {data.pagination.totalPages > 1 ? (
+                  <div className="flex flex-col gap-4 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {(page - 1) * data.pagination.limit + 1}-
+                      {Math.min(page * data.pagination.limit, data.pagination.total)} of{" "}
+                      {data.pagination.total} events
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!data.pagination.hasPrev}
+                        onClick={() => setPage((current) => current - 1)}
+                      >
+                        Previous
+                      </Button>
+                      <span className="px-2 text-sm text-muted-foreground">
+                        {page} / {data.pagination.totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!data.pagination.hasNext}
+                        onClick={() => setPage((current) => current + 1)}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </SectionCard>
+          )}
+        </>
+      ) : null}
+
       <DetailModal
         event={selectedEvent}
         open={!!selectedEvent}

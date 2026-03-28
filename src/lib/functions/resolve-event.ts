@@ -424,26 +424,40 @@ export const resolveGithubEvent = inngest.createFunction(
         }),
       );
       const baseSha = branchRef.data.object.sha;
-      const branchName = `fix/auto-${eventId.slice(0, 8)}`;
+      // Determine branch name based on strategy
+      const { strategy, customBranch } = event.data;
+      let branchName: string;
+      if (strategy === "same") {
+        const githubEvent = await prisma.githubEvent.findUnique({
+          where: { id: eventId },
+          select: { sourceBranch: true },
+        });
+        branchName = githubEvent?.sourceBranch ?? defaultBranch;
+      } else if (strategy === "custom" && customBranch) {
+        branchName = customBranch;
+      } else {
+        branchName = `fix/auto-${eventId.slice(0, 8)}`;
+      }
 
-      // Idempotent branch creation — don't fail if already exists
-      try {
-        await withRetry(() =>
-          octokit.rest.git.createRef({
-            owner,
-            repo: repoName,
-            ref: `refs/heads/${branchName}`,
-            sha: baseSha,
-          }),
-        );
-      } catch (err: any) {
-        if (err?.status === 422) {
-          // Branch already exists from a previous attempt — continue
-          console.warn(
-            `[resolve-event] Branch ${branchName} already exists — continuing`,
+      // Only create a new branch if not fixing in same branch
+      if (strategy !== "same") {
+        try {
+          await withRetry(() =>
+            octokit.rest.git.createRef({
+              owner,
+              repo: repoName,
+              ref: `refs/heads/${branchName}`,
+              sha: baseSha,
+            }),
           );
-        } else {
-          throw err;
+        } catch (err: any) {
+          if (err?.status === 422) {
+            console.warn(
+              `[resolve-event] Branch ${branchName} already exists — continuing`,
+            );
+          } else {
+            throw err;
+          }
         }
       }
 

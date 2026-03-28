@@ -89,6 +89,7 @@ model GithubEvent {
   type        EventType
   title       String
   description String?
+  sourceBranch String?
   payload     Json
   status      EventStatus @default(PENDING)
   createdAt   DateTime    @default(now())
