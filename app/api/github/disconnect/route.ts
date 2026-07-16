@@ -16,7 +16,8 @@ export async function POST(req: Request){
     if(!githubId){
         return Response.json({ error: "Missing githubId" }, { status: 400 })
     }
-    // 3. Get access token
+    
+    // 3. Get GitHub access token to delete the webhook
     const account = await prisma.account.findFirst({
         where: {
             userId: session.user.id,
@@ -29,14 +30,16 @@ export async function POST(req: Request){
             { status: 400 }
         )
     }
-    // 4. Find repo in DB
+    // 4. Find repo in DB — needed for fullName and webhookId
     const repo = await prisma.repo.findUnique({
         where: { githubId }
     })
     if(!repo){
         return Response.json({ error: "Repository not found" }, { status: 404 })
     }
-    // 5. Delete webhook from GitHub
+    // 5. Delete webhook from GitHub so it stops sending events
+    // If webhookId is missing we skip this step — repo may have been
+    // manually disconnected from GitHub already
     if (repo.webhookId) {
         await fetch(
         `https://api.github.com/repos/${repo.fullName}/hooks/${repo.webhookId}`,

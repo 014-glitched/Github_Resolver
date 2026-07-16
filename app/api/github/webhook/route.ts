@@ -97,12 +97,63 @@ export async function POST(req: Request) {
           },
         });
       }
+    // On synchronize — a new commit was pushed to this PR branch.
+    // Parse the commit message for error patterns (same logic as push handler).
+    // This covers repos WITH ci too — ci_failure will also fire separately
+    // but deduplication will drop it if a card already exists within 10 min.
+    if (payload.action === "synchronize" && !repo.hasCI) {
+      const headCommitMessage: string =
+        payload.pull_request?.head?.sha
+          ? `${payload.after ?? ""}`
+          : "";
+    
+      // The synchronize payload doesn't have commits[], but the
+      // pull_request.title + body often reflects the latest push.
+      // More reliably: check payload.sender and payload.pull_request.head.sha
+      // We use the PR title as a fallback error signal.
+      const commitMsg: string =
+        (payload.pull_request?.body ?? "") +
+        " " +
+        (payload.pull_request?.title ?? "");
+
+      const hasErrorSignal =
+        /TypeError|SyntaxError|ReferenceError|RangeError|Error:|fatal:|error TS[0-9]+|Cannot find|failed to compile|compilation failed|build failed|npm ERR!/i.test(
+          commitMsg,
+        );
+
+      if (hasErrorSignal && sourceBranch) {
+        // Check dedup window
+        const existing = await prisma.githubEvent.findFirst({
+          where: {
+            repoId: repo.id,
+            type: "CODE_ERROR",
+            status: { in: ["PENDING", "RESOLVING"] },
+            createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
+          },
+        });
+
+        if (!existing) {
+          await prisma.githubEvent.create({
+            data: {
+              userId: repo.userId,
+              repoId: repo.id,
+              type: "CODE_ERROR",
+              title: `Error in PR: ${prTitle}`,
+              description: `New commit on PR #${prNumber} contains error signals — ${repo.fullName}`,
+              sourceBranch,
+              payload,
+              status: "PENDING",
+            },
+          });
+        }
+      }
+    }
       return Response.json({ received: true });
     }
   }
 
   // Parse the raw GitHub event into our internal event format
-  const githubEvent = parseGithubEvent(event, payload);
+  const githubEvent = parseGithubEvent(event, payload, repo.hasCI);
   if (!githubEvent) {
     return Response.json({ received: true });
   }
@@ -209,7 +260,7 @@ export async function POST(req: Request) {
  *
  * Returns null for events we don't care about — these are silently ignored.
  */
-function parseGithubEvent(event: string, payload: any) {
+function parseGithubEvent(event: string, payload: any, hasCI: boolean) {
   /**
    * CI failure — fires when a GitHub Actions check run completes with a failure.
    * Only tracks definitive failures, not cancelled or skipped runs.
@@ -235,7 +286,7 @@ function parseGithubEvent(event: string, payload: any) {
    * Pushes to resolver's own fix/auto-* branches are always ignored
    * to prevent the resolver's own commits from creating new events.
    */
-  if (event === "push") {
+  if (event === "push" && !hasCI) {
     const pushedBranch = payload.ref ?? "";
 
     // Ignore the resolver's own auto-fix branches

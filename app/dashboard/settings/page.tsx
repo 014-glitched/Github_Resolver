@@ -13,6 +13,7 @@ import {
   Trash2,
   Unplug,
   UserRound,
+  RefreshCcw
 } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -50,6 +51,8 @@ type UserProfile = {
     name: string;
     fullName: string;
     private: boolean;
+    githubId: number;
+    hasCI: boolean; 
     webhookId: number | null;
     createdAt: string;
   }[];
@@ -87,6 +90,16 @@ async function disconnectRepo(githubId: number) {
   return res.json();
 }
 
+async function refreshCI(repoId: string){
+  const res = await fetch("api/github/refresh-ci", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repoId })
+  })
+  if (!res.ok) throw new Error("Failed to refresh CI status");
+  return res.json();
+}
+
 function SettingsLoading() {
   return (
     <div className="space-y-4">
@@ -116,6 +129,7 @@ export default function SettingsPage() {
   const [disconnectAllOpen, setDisconnectAllOpen] = useState(false);
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [refreshingCIId, setRefreshingCIId] = useState<string | null>(null)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["settings-profile"],
@@ -148,6 +162,15 @@ export default function SettingsPage() {
     },
     onSettled: () => setDisconnectingId(null),
   });
+
+  const refreshCIMutation = useMutation({
+    mutationFn: (repoId: string) => refreshCI(repoId),
+    onMutate: (repoId) => setRefreshingCIId(repoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings-profile"] })
+    },
+    onSettled: () => setRefreshingCIId(null),
+  })
 
   const user = data?.user;
 
@@ -313,6 +336,17 @@ export default function SettingsPage() {
                                 Private
                               </Badge>
                             ) : null}
+                            {/* Show CI status badge */}
+                            <Badge
+                              variant="outline"
+                              className={`h-6 rounded-full px-2.5 text-xs ${
+                                repo.hasCI
+                                  ? "border-success/20 bg-success/10 text-success"
+                                  : "border-border/40 bg-muted/20 text-muted-foreground"
+                              }`}
+                            >
+                              {repo.hasCI ? "CI detected" : "No CI"}
+                            </Badge>
                           </div>
                           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                             <span className="inline-flex items-center gap-2">
@@ -326,6 +360,17 @@ export default function SettingsPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {/* Refresh CI status — useful if CI was added after connecting */}
+  <Button
+    size="sm"
+    variant="outline"
+    disabled={refreshingCIId === repo.id}
+    onClick={() => refreshCIMutation.mutate(repo.id)}
+    className="hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+  >
+    <RefreshCcw className="size-4" />
+    {refreshingCIId === repo.id ? "Checking..." : "Refresh CI"}
+  </Button>
                           <Button
                             size="sm"
                             variant="outline"

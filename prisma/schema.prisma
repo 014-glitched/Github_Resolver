@@ -14,9 +14,11 @@ model Repo {
   fullName  String
   private   Boolean  @default(false)
   webhookId Int?
+  hasCI     Boolean  @default(false)   
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   events    GithubEvent[]
+  issueJobs GithubIssueJob[]
 }
 
 model Verification {
@@ -43,6 +45,7 @@ model User {
   sessions      Session[]
   repos         Repo[]
   githubEvents  GithubEvent[]
+  issueJobs     GithubIssueJob[]
 
   @@map("user")
 }
@@ -140,4 +143,56 @@ enum JobStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+// Tracks the AI resolve job for a GitHub Issue.
+// The issue itself lives on GitHub — we only store the job state and output (PR url, status, etc).
+model GithubIssueJob {
+  id          String          @id @default(cuid())
+  userId      String
+  repoId      String
+
+  // GitHub issue fields — stored so we can display
+  // them without re-fetching from GitHub API
+  issueNumber Int
+  issueTitle  String
+  issueBody   String?         // original issue description
+  issueUrl    String?         // link back to the GitHub issue
+
+  // Branch strategy chosen in the resolve modal
+  strategy     String          @default("new")  // "same" | "new" | "custom"
+  branchName   String?         // final branch name used
+
+  // Job lifecycle
+  status      IssueJobStatus  @default(QUEUED)
+  prUrl       String?
+  prNumber    Int?
+  errorMsg    String?
+
+  // Self-critique step output — stored for debugging
+  verifyVerdict  String?       // "approved" | "revised"
+  verifyNote     String?       // reviewer's explanation
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  // One active job per issue per repo at a time
+  // Prevents duplicate resolve jobs for the same issue
+  @@unique([repoId, issueNumber])
+}
+
+enum IssueJobStatus {
+  QUEUED           // job created, waiting for Inngest to pick it up
+  FETCHING_CONTEXT // fetching issue body, comments, repo files
+  ANALYZING        // Claude Pass 1 — generating the fix
+  VERIFYING        // Claude Pass 2 — self-critique of the fix
+  CREATING_PR      // committing files and opening the PR
+  COMPLETED        // PR created successfully
+  FAILED           // something went wrong — check errorMsg
+  CANCELLED        // user cancelled before completion
 }

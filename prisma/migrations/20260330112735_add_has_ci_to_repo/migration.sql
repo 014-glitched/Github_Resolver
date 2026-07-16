@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Repo" ADD COLUMN     "hasCI" BOOLEAN NOT NULL DEFAULT false;
