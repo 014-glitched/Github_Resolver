@@ -73,12 +73,14 @@ export async function GET(req: Request){
     ])
 
     // Get most active repo name
-    const mostActiveRepo = allRepos.length > 0 
-        ?   await prisma.repo.findUnique({
-                where: { id: allRepos[0].repoId },
-                select: { name: true }
-            }).then((r) => r?.name ?? null) 
-        : null
+    let mostActiveRepo: string | null = null
+    if (allRepos.length > 0) {
+        const repo = await prisma.repo.findUnique({
+            where: { id: allRepos[0].repoId },
+            select: { name: true },
+        })
+        mostActiveRepo = repo?.name ?? null
+    }
 
     const totalEvents = await prisma.githubEvent.count({
         where: { userId: session.user.id }
