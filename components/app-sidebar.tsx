@@ -3,7 +3,9 @@
 import { signOut } from "@/src/lib/auth-client";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { FolderGit2, LayoutDashboard, LogOut, Settings, Waypoints } from "lucide-react";
+import { CircleDot, FolderGit2, LogOut, Settings } from "lucide-react";
+// ISSUES-ONLY MODE: Dashboard + Activity nav temporarily disabled
+// import { LayoutDashboard, Waypoints } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -21,21 +23,28 @@ import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/brand-mark";
 
 const navItems = [
+  // ISSUES-ONLY MODE: event-feed dashboard temporarily disabled
+  // {
+  //   label: "Dashboard",
+  //   href: "/dashboard",
+  //   icon: <LayoutDashboard className="size-4" />,
+  // },
   {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: <LayoutDashboard className="size-4" />,
+    label: "Issues",
+    href: "/dashboard/issues",
+    icon: <CircleDot className="size-4" />,
   },
   {
     label: "Repositories",
     href: "/dashboard/repositories",
     icon: <FolderGit2 className="size-4" />,
   },
-  {
-    label: "Activity",
-    href: "/dashboard/activity",
-    icon: <Waypoints className="size-4" />,
-  },
+  // ISSUES-ONLY MODE: activity (GithubEvent history) temporarily disabled
+  // {
+  //   label: "Activity",
+  //   href: "/dashboard/activity",
+  //   icon: <Waypoints className="size-4" />,
+  // },
   {
     label: "Settings",
     href: "/dashboard/settings",

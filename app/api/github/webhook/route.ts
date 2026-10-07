@@ -1,7 +1,9 @@
-import { inngest } from "@/src/inngest/client";
 import prisma from "@/src/lib/prisma";
 import * as crypto from "crypto";
 import { headers } from "next/headers";
+
+// ISSUES-ONLY MODE: event-feed Inngest triggers temporarily disabled
+// import { inngest } from "@/src/inngest/client";
 
 /**
  * Verifies that the incoming webhook payload was sent by GitHub
@@ -21,14 +23,9 @@ function verifyGithubSignature(
 /**
  * Main webhook handler — receives all GitHub events for connected repositories.
  *
- * Flow:
- * 1. Validate signature to confirm the request is from GitHub
- * 2. Find the repo in our DB — ignore events for unconnected repos
- * 3. PR events → hand off to Inngest for delayed mergeable check
- * 4. Other events → parse, deduplicate, and save to DB
- *
- * Note: Resolve jobs are never triggered here.
- * Resolution only happens when the user clicks "Resolve issue" on the dashboard.
+ * ISSUES-ONLY MODE: signature + repo lookup still run so webhooks stay valid,
+ * but CI / CODE_ERROR / PR_CONFLICT GithubEvent creation is disabled.
+ * Resolution for GitHub Issues happens via /dashboard/issues only.
  */
 export async function POST(req: Request) {
   const headersList = await headers();
@@ -70,14 +67,13 @@ export async function POST(req: Request) {
     return Response.json({ received: true });
   }
 
-  /**
-   * PR conflict detection — handed off to Inngest instead of checked directly.
-   *
-   * GitHub's mergeable field is null when the webhook first fires because
-   * GitHub runs its merge simulation asynchronously. We send the PR data
-   * to Inngest which waits and polls with backoff + jitter until GitHub
-   * returns a definitive mergeable value.
-   */
+  // ISSUES-ONLY MODE: acknowledge webhook but do not create GithubEvent cards
+  // or trigger PR-mergeable / event-resolve jobs.
+  return Response.json({ received: true, mode: "issues-only" });
+
+  /*
+  // ── DISABLED: event-feed webhook processing (restore when re-enabling Dashboard) ──
+
   if (event === "pull_request") {
     if (["opened", "synchronize", "reopened"].includes(payload.action)) {
       const prNumber = payload.pull_request?.number;
@@ -97,74 +93,53 @@ export async function POST(req: Request) {
           },
         });
       }
-    // On synchronize — a new commit was pushed to this PR branch.
-    // Parse the commit message for error patterns (same logic as push handler).
-    // This covers repos WITH ci too — ci_failure will also fire separately
-    // but deduplication will drop it if a card already exists within 10 min.
-    if (payload.action === "synchronize" && !repo.hasCI) {
-      const headCommitMessage: string =
-        payload.pull_request?.head?.sha
-          ? `${payload.after ?? ""}`
-          : "";
-    
-      // The synchronize payload doesn't have commits[], but the
-      // pull_request.title + body often reflects the latest push.
-      // More reliably: check payload.sender and payload.pull_request.head.sha
-      // We use the PR title as a fallback error signal.
-      const commitMsg: string =
-        (payload.pull_request?.body ?? "") +
-        " " +
-        (payload.pull_request?.title ?? "");
 
-      const hasErrorSignal =
-        /TypeError|SyntaxError|ReferenceError|RangeError|Error:|fatal:|error TS[0-9]+|Cannot find|failed to compile|compilation failed|build failed|npm ERR!/i.test(
-          commitMsg,
-        );
+      if (payload.action === "synchronize" && !repo.hasCI) {
+        const commitMsg: string =
+          (payload.pull_request?.body ?? "") +
+          " " +
+          (payload.pull_request?.title ?? "");
 
-      if (hasErrorSignal && sourceBranch) {
-        // Check dedup window
-        const existing = await prisma.githubEvent.findFirst({
-          where: {
-            repoId: repo.id,
-            type: "CODE_ERROR",
-            status: { in: ["PENDING", "RESOLVING"] },
-            createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
-          },
-        });
+        const hasErrorSignal =
+          /TypeError|SyntaxError|ReferenceError|RangeError|Error:|fatal:|error TS[0-9]+|Cannot find|failed to compile|compilation failed|build failed|npm ERR!/i.test(
+            commitMsg,
+          );
 
-        if (!existing) {
-          await prisma.githubEvent.create({
-            data: {
-              userId: repo.userId,
+        if (hasErrorSignal && sourceBranch) {
+          const existing = await prisma.githubEvent.findFirst({
+            where: {
               repoId: repo.id,
               type: "CODE_ERROR",
-              title: `Error in PR: ${prTitle}`,
-              description: `New commit on PR #${prNumber} contains error signals — ${repo.fullName}`,
-              sourceBranch,
-              payload,
-              status: "PENDING",
+              status: { in: ["PENDING", "RESOLVING"] },
+              createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
             },
           });
+
+          if (!existing) {
+            await prisma.githubEvent.create({
+              data: {
+                userId: repo.userId,
+                repoId: repo.id,
+                type: "CODE_ERROR",
+                title: `Error in PR: ${prTitle}`,
+                description: `New commit on PR #${prNumber} contains error signals — ${repo.fullName}`,
+                sourceBranch,
+                payload,
+                status: "PENDING",
+              },
+            });
+          }
         }
       }
-    }
       return Response.json({ received: true });
     }
   }
 
-  // Parse the raw GitHub event into our internal event format
   const githubEvent = parseGithubEvent(event, payload, repo.hasCI);
   if (!githubEvent) {
     return Response.json({ received: true });
   }
 
-  /**
-   * Scenario 1 — Re-opened issue on a previously resolved branch.
-   *
-   * If a new buggy push comes in on the same branch as a resolved event,
-   * we reset that event back to PENDING instead of creating a duplicate card.
-   * The resolve job is also cleared so it can be re-run cleanly.
-   */
   if (githubEvent.sourceBranch) {
     const resolvedEvent = await prisma.githubEvent.findFirst({
       where: {
@@ -178,7 +153,6 @@ export async function POST(req: Request) {
     });
 
     if (resolvedEvent) {
-      // Reset event back to PENDING with fresh title, description and payload
       await prisma.githubEvent.update({
         where: { id: resolvedEvent.id },
         data: {
@@ -190,7 +164,6 @@ export async function POST(req: Request) {
         },
       });
 
-      // Clear old resolve job so it can be queued again from scratch
       if (resolvedEvent.resolveJob) {
         await prisma.resolveJob.update({
           where: { eventId: resolvedEvent.id },
@@ -209,13 +182,6 @@ export async function POST(req: Request) {
     }
   }
 
-  /**
-   * Deduplication — prevents multiple cards for the same error burst.
-   *
-   * If an identical event type is already PENDING or RESOLVING for this repo
-   * within the last 10 minutes, we silently drop the duplicate.
-   * This handles cases like multiple CI checks failing in quick succession.
-   */
   const existing = await prisma.githubEvent.findFirst({
     where: {
       repoId: repo.id,
@@ -231,7 +197,6 @@ export async function POST(req: Request) {
     return Response.json({ received: true });
   }
 
-  // Save the new event — user will resolve it manually from the dashboard
   await prisma.githubEvent.create({
     data: {
       userId: repo.userId,
@@ -246,25 +211,12 @@ export async function POST(req: Request) {
   });
 
   return Response.json({ received: true });
+  */
 }
 
-/**
- * Parses a raw GitHub webhook event into our internal event format.
- *
- * Supported event types:
- * - CI_FAILURE  → check_run completed with conclusion "failure"
- * - CODE_ERROR  → push containing commit messages with actual error output
- *
- * PR_CONFLICT is intentionally NOT handled here — it goes through the
- * delayed Inngest mergeable check instead (see above).
- *
- * Returns null for events we don't care about — these are silently ignored.
- */
+/*
+// ISSUES-ONLY MODE: parseGithubEvent disabled with event-feed path above.
 function parseGithubEvent(event: string, payload: any, hasCI: boolean) {
-  /**
-   * CI failure — fires when a GitHub Actions check run completes with a failure.
-   * Only tracks definitive failures, not cancelled or skipped runs.
-   */
   if (event === "check_run" && payload.action === "completed") {
     if (payload.check_run?.conclusion === "failure") {
       return {
@@ -276,20 +228,9 @@ function parseGithubEvent(event: string, payload: any, hasCI: boolean) {
     }
   }
 
-  /**
-   * Code error — fires on push events where commit messages contain
-   * actual error output patterns (TypeErrors, build failures, etc).
-   *
-   * Intentionally strict — normal commit messages like "fix: resolve bugs"
-   * or "error handling improvements" will NOT trigger this.
-   *
-   * Pushes to resolver's own fix/auto-* branches are always ignored
-   * to prevent the resolver's own commits from creating new events.
-   */
   if (event === "push" && !hasCI) {
     const pushedBranch = payload.ref ?? "";
 
-    // Ignore the resolver's own auto-fix branches
     if (pushedBranch.startsWith("refs/heads/fix/auto-")) {
       return null;
     }
@@ -313,3 +254,4 @@ function parseGithubEvent(event: string, payload: any, hasCI: boolean) {
 
   return null;
 }
+*/

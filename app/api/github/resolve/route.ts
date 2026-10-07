@@ -1,21 +1,33 @@
-import { inngest } from "@/src/inngest/client";
 import { auth } from "@/src/lib/auth";
-import prisma from "@/src/lib/prisma";
 import { headers } from "next/headers";
 
-export async function POST(req: Request) {
+// ISSUES-ONLY MODE: event-feed resolve temporarily disabled
+// import { inngest } from "@/src/inngest/client";
+// import prisma from "@/src/lib/prisma";
+
+export async function POST(_req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // ISSUES-ONLY MODE: use POST /api/github/issues/resolve instead
+  return Response.json(
+    {
+      error:
+        "Event resolve is temporarily disabled. Use the Issues page to resolve GitHub issues.",
+    },
+    { status: 410 },
+  );
+
+  /*
   const { eventId, strategy, customBranch } = await req.json();
 
   if (!eventId) {
     return Response.json({ error: "Missing eventId" }, { status: 400 });
   }
-  // Verify event belongs to user
+
   const event = await prisma.githubEvent.findUnique({
     where: { id: eventId },
     select: { id: true, userId: true, status: true },
@@ -36,7 +48,7 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  // Create resolve job record
+
   const job = await prisma.resolveJob.upsert({
     where: { eventId },
     update: { status: "QUEUED", errorMsg: null },
@@ -45,7 +57,7 @@ export async function POST(req: Request) {
       status: "QUEUED",
     },
   });
-  // Trigger Inngest job
+
   try {
     await inngest.send({
       name: "github/event.resolve",
@@ -65,4 +77,5 @@ export async function POST(req: Request) {
   }
 
   return Response.json({ job });
+  */
 }
