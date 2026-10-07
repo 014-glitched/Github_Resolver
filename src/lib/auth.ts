@@ -18,5 +18,8 @@ export const auth = betterAuth({
       ],
     },
   },
-  trustedOrigins: ["http://localhost:3000"],
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://github-resolver-git-main-devs-code.vercel.app",
+  ],
 });
