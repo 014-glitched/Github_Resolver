@@ -1,7 +1,34 @@
 import { auth } from "@/src/lib/auth";
 import prisma from "@/src/lib/prisma";
+import type { IssueJobStatus } from "@prisma/client";
 import { headers } from "next/headers";
 import { Octokit } from "octokit";
+
+type IssueJobSummary = {
+    id: string;
+    issueNumber: number;
+    status: IssueJobStatus;
+    prUrl: string | null;
+    prNumber: number | null;
+    errorMsg: string | null;
+    verifyVerdict: string | null;
+    createdAt: Date;
+    completedAt: Date | null;
+};
+
+type GithubIssueItem = {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    state: string;
+    labels: Array<string | { name?: string | null }>;
+    user: { login?: string | null; avatar_url?: string | null } | null;
+    created_at: string;
+    updated_at: string;
+    comments: number;
+    pull_request?: unknown;
+};
 
 export async function GET(req: Request) {
     const session = await auth.api.getSession({ headers: await headers() })
@@ -42,7 +69,7 @@ export async function GET(req: Request) {
     const octokit = new Octokit({ auth: account?.accessToken })
     const [owner, repoName] = repo.fullName.split("/")
 
-    let githubIssues: any[] = [];
+    let githubIssues: GithubIssueItem[] = [];
 
     try{
         // GitHub returns PRs in the issues list too — filter them out
@@ -54,10 +81,11 @@ export async function GET(req: Request) {
             per_page: 100,
         })
         githubIssues = response.data.filter(
-            (issue) => !issue.pull_request, // filter PRs from the issue list
-        )
-    }catch(err: any){
-        console.error("[issues/GET] Failed to fetch from GitHub:", err?.message);
+            (issue) => !issue.pull_request,
+        ) as GithubIssueItem[]
+    }catch(err: unknown){
+        const message = err instanceof Error ? err.message : String(err)
+        console.error("[issues/GET] Failed to fetch from GitHub:", message);
         return Response.json(
             { error: "Failed to fetch issues from Github" },
             { status: 502 }
@@ -65,7 +93,7 @@ export async function GET(req: Request) {
     }
 
     // ── Fetch existing resolve jobs for this repo
-    const existingJobs = await prisma.githubIssueJob.findMany({
+    const existingJobs: IssueJobSummary[] = await prisma.githubIssueJob.findMany({
         where: { repoId },
         select: {
             id: true,
@@ -80,10 +108,12 @@ export async function GET(req: Request) {
         }
     })
     // Build a map for O(1) lookup: issueNumber → job
-    const jobMap = new Map(existingJobs.map((job) => [job.issueNumber, job]))
+    const jobMap = new Map<number, IssueJobSummary>(
+        existingJobs.map((job: IssueJobSummary) => [job.issueNumber, job]),
+    )
 
     // ── Merge issues with job status
-    const issues = githubIssues.map((issue) => {
+    const issues = githubIssues.map((issue: GithubIssueItem) => {
         const job = jobMap.get(issue.number) ?? null
 
         return {
@@ -93,7 +123,7 @@ export async function GET(req: Request) {
             body: issue.body ?? "",
             url: issue.html_url,
             state: issue.state,
-            labels: issue.labels.map((l: any) =>
+            labels: issue.labels.map((l: string | { name?: string | null }) =>
                 typeof l === "string" ? l : l.name ?? "",
             ),
             author: issue.user?.login ?? "unknown",

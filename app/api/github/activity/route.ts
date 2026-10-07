@@ -21,7 +21,7 @@ export async function GET(req: Request){
         ...(status != "ALL" && { status }),
         ...(search && {
             OR: [
-                { title: { contains: search, mode: "insensitive "}},
+                { title: { contains: search, mode: "insensitive" }},
                 { repo: { fullName: { contains: search, mode: "insensitive" }}}
             ]
         })

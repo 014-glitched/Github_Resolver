@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "inngest": "npx inngest-cli@latest dev -u http://localhost:3000/api/inngest",
@@ -27,6 +28,7 @@
     "next": "16.1.6",
     "octokit": "^5.0.5",
     "pg": "^8.20.0",
+    "prisma": "^7.4.2",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -42,7 +44,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "prisma": "^7.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

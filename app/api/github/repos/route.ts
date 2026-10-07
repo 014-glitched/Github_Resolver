@@ -52,10 +52,22 @@ export async function GET(){
         select: { githubId: true }
     })
 
-    const connectedIds = new Set(connectedRepos.map((repo) => repo.githubId))
+    const connectedIds = new Set(
+        connectedRepos.map((repo: { githubId: number }) => repo.githubId),
+    )
 
     // 5. Return cleaned up repo list with connected status
-    const data = repos.map((repo: any) => ({
+    type GithubRepo = {
+        id: number
+        name: string
+        full_name: string
+        private: boolean
+        description: string | null
+        language: string | null
+        updated_at: string
+    }
+
+    const data = (repos as GithubRepo[]).map((repo: GithubRepo) => ({
         id: repo.id,
         name: repo.name,
         fullName: repo.full_name,
