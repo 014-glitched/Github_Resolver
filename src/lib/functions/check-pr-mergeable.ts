@@ -26,9 +26,9 @@ export const checkPrMergeable = inngest.createFunction(
     {
         id: "check-pr-mergeable",
         name: "Check PR Mergeable Status",
-        retries: 0
+        retries: 0,
+        triggers: [{ event: "github/pr.check-mergeable" }],
     },
-    { event: "github/pr.check-mergeable" },
     async ({ event, step }) => {
         const {
             repoId,

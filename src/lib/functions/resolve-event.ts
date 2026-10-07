@@ -53,8 +53,8 @@ export const resolveGithubEvent = inngest.createFunction(
         },
       });
     },
+    triggers: [{ event: "github/event.resolve" }],
   },
-  { event: "github/event.resolve" },
   async ({ event, step }) => {
     const { eventId } = event.data;
 

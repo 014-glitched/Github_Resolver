@@ -44,8 +44,8 @@ export const resolveGithubIssue = inngest.createFunction(
         },
       });
     },
+    triggers: [{ event: "github/issue.resolve" }],
   },
-  { event: "github/issue.resolve" },
   async ({ event, step }) => {
     const {
       jobId,
