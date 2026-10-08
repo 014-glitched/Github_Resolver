@@ -293,16 +293,6 @@ export default function SettingsPage() {
                 </div>
               </SectionCard>
             </div>
-
-            <SectionCard title="Permissions" description="GitHub OAuth scopes granted to GitHubResolver.">
-              <div className="flex flex-wrap gap-2">
-                {scopes.map((scope) => (
-                  <Badge key={scope} variant="outline" className="h-6 rounded-full px-2.5 text-xs">
-                    {scope}
-                  </Badge>
-                ))}
-              </div>
-            </SectionCard>
           </TabsContent>
 
           <TabsContent value="repositories" className="space-y-4">

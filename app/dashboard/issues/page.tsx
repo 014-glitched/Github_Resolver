@@ -63,6 +63,20 @@ type IssueJob = {
   completedAt: string | null;
 };
 
+type IssueTriage = {
+  confidence: number;
+  effort: "S" | "M" | "L";
+  risk: "low" | "medium" | "high";
+  reason: string;
+  issueUpdatedAt: string;
+  stale: boolean;
+  model: string;
+  promptVersion: string;
+  provider: string;
+  createdAt: string;
+  errorMsg: string | null;
+};
+
 type GithubIssue = {
   number: number;
   title: string;
@@ -76,6 +90,7 @@ type GithubIssue = {
   updatedAt: string;
   commentsCount: number;
   job: IssueJob | null;
+  triage: IssueTriage | null;
 };
 
 type Repo = {
@@ -119,6 +134,36 @@ async function triggerIssueResolve(payload: {
     throw new Error(data.error ?? "Failed to trigger resolve");
   }
   return res.json();
+}
+
+async function triggerIssueTriage(payload: {
+  repoId: string;
+  issueNumber?: number;
+  issueNumbers?: number[];
+  force?: boolean;
+}) {
+  const res = await fetch("/api/github/issues/triage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? data.details ?? "Failed to triage issue");
+  }
+  return res.json();
+}
+
+function riskBadgeClass(risk: IssueTriage["risk"]) {
+  if (risk === "low") return "border-success/20 bg-success/10 text-success";
+  if (risk === "medium") return "border-warning/20 bg-warning/10 text-warning";
+  return "border-destructive/20 bg-destructive/10 text-destructive";
+}
+
+function confidenceTone(confidence: number) {
+  if (confidence >= 75) return "text-success";
+  if (confidence >= 50) return "text-warning";
+  return "text-destructive";
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -373,13 +418,17 @@ function IssueResolveModal({
 function IssueCard({
   issue,
   onResolve,
+  onTriage,
   isTriggering,
+  isTriaging,
 }: {
   issue: GithubIssue;
   onResolve: (issue: GithubIssue) => void;
+  onTriage: (issue: GithubIssue) => void;
   isTriggering: boolean;
+  isTriaging: boolean;
 }) {
-  const { job } = issue;
+  const { job, triage } = issue;
   const cardState = getJobCardState(job);
   const isResolving = cardState === "resolving";
   const isResolved = cardState === "resolved";
@@ -441,6 +490,65 @@ function IssueCard({
                   ))}
                 </div>
               )}
+
+              {/* AI triage row */}
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {isTriaging && !triage ? (
+                  <Skeleton className="h-5 w-40 rounded-full" />
+                ) : triage && !triage.errorMsg ? (
+                  <>
+                    <Badge
+                      variant="outline"
+                      className={`h-5 rounded-full px-2 text-[11px] font-medium ${confidenceTone(triage.confidence)} border-border/60`}
+                    >
+                      Confidence {triage.confidence}%
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className="h-5 rounded-full border-border/60 bg-muted/40 px-2 text-[11px] text-muted-foreground"
+                    >
+                      Effort {triage.effort}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={`h-5 rounded-full px-2 text-[11px] font-medium ${riskBadgeClass(triage.risk)}`}
+                    >
+                      Risk {triage.risk}
+                    </Badge>
+                    {triage.stale && (
+                      <Badge
+                        variant="outline"
+                        className="h-5 rounded-full border-warning/30 bg-warning/10 px-2 text-[11px] text-warning"
+                      >
+                        Stale
+                      </Badge>
+                    )}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="max-w-[280px] truncate text-xs text-muted-foreground">
+                            {triage.reason}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs">
+                          <p>{triage.reason}</p>
+                          <p className="mt-1 text-muted-foreground">
+                            {triage.promptVersion} · {triage.model}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </>
+                ) : triage?.errorMsg ? (
+                  <span className="text-xs text-destructive">
+                    Triage failed — retry to score this issue
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Not triaged yet
+                  </span>
+                )}
+              </div>
 
               {/* Meta row — author, age, comments */}
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -598,6 +706,25 @@ function IssueCard({
           </a>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isTriaging}
+              onClick={() => onTriage(issue)}
+            >
+              {isTriaging ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Scoring...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="size-4" />
+                  {triage && !triage.errorMsg ? "Re-triage" : "Triage"}
+                </>
+              )}
+            </Button>
+
             {/* Idle — no job yet */}
             {cardState === "idle" && (
               <Button
@@ -711,6 +838,8 @@ export default function IssuesPage() {
   const [resolveModalIssue, setResolveModalIssue] =
     useState<GithubIssue | null>(null);
   const [triggeringNumber, setTriggeringNumber] = useState<number | null>(null);
+  const [triagingNumber, setTriagingNumber] = useState<number | null>(null);
+  const [batchTriaging, setBatchTriaging] = useState(false);
 
   // Fetch connected repos
   const {
@@ -767,6 +896,31 @@ export default function IssuesPage() {
     },
     onSettled: () => setTriggeringNumber(null),
   });
+
+  const triageMutation = useMutation({
+    mutationFn: triggerIssueTriage,
+    onMutate: (vars) => {
+      if (vars.issueNumber) setTriagingNumber(vars.issueNumber);
+      if (vars.issueNumbers?.length) setBatchTriaging(true);
+    },
+    onError: (error) => {
+      console.error("Failed to triage issue:", error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["issues", effectiveRepoId],
+      });
+    },
+    onSettled: () => {
+      setTriagingNumber(null);
+      setBatchTriaging(false);
+    },
+  });
+
+  const needsTriageNumbers = issues
+    .filter((i) => !i.triage || i.triage.stale || i.triage.errorMsg)
+    .map((i) => i.number)
+    .slice(0, 10);
 
   const isLoading = reposLoading || (!!effectiveRepoId && issuesLoading);
 
@@ -848,20 +1002,42 @@ export default function IssuesPage() {
           {!isLoading && !issuesError && issues.length > 0 && (
             <SectionCard
               title={`Open issues · ${issues.length}`}
-              description={`Showing all open issues for ${issuesData?.repoFullName}. Click "Resolve with AI" to generate a fix.`}
+              description={`Showing open issues for ${issuesData?.repoFullName}. Triage scores how safely AI can resolve each issue; Resolve remains optional.`}
               action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    queryClient.invalidateQueries({
-                      queryKey: ["issues", effectiveRepoId],
-                    })
-                  }
-                >
-                  <RefreshCcw className="size-4" />
-                  Refresh
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={batchTriaging || needsTriageNumbers.length === 0}
+                    onClick={() => {
+                      if (!effectiveRepoId || needsTriageNumbers.length === 0)
+                        return;
+                      triageMutation.mutate({
+                        repoId: effectiveRepoId,
+                        issueNumbers: needsTriageNumbers,
+                      });
+                    }}
+                  >
+                    {batchTriaging ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
+                    Triage unscored
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      queryClient.invalidateQueries({
+                        queryKey: ["issues", effectiveRepoId],
+                      })
+                    }
+                  >
+                    <RefreshCcw className="size-4" />
+                    Refresh
+                  </Button>
+                </div>
               }
             >
               <div className="space-y-4">
@@ -870,7 +1046,18 @@ export default function IssuesPage() {
                     key={issue.number}
                     issue={issue}
                     onResolve={(i) => setResolveModalIssue(i)}
+                    onTriage={(i) => {
+                      if (!effectiveRepoId) return;
+                      triageMutation.mutate({
+                        repoId: effectiveRepoId,
+                        issueNumber: i.number,
+                        force: true,
+                      });
+                    }}
                     isTriggering={triggeringNumber === issue.number}
+                    isTriaging={
+                      batchTriaging || triagingNumber === issue.number
+                    }
                   />
                 ))}
               </div>
