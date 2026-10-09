@@ -6,18 +6,21 @@ import {
   ArrowUpRight,
   Check,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   GitBranch,
-  GitPullRequest,
+  LayoutList,
   LoaderCircle,
+  Map as MapIcon,
   MessageSquare,
   RefreshCcw,
   Sparkles,
   Tag,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { IssueDetailSheet } from "@/components/issues/issue-detail-sheet";
+import { IssueFilters } from "@/components/issues/issue-filters";
+import { TriageMap } from "@/components/issues/triage-map";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { Badge } from "@/components/ui/badge";
@@ -34,11 +37,25 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  countMissingTriage,
+  defaultIssueFilters,
+  matchesIssueFilters,
+  toPlotPoints,
+  type IssueFilterState,
+  type TriageMapIssueInput,
+} from "@/src/lib/triage/map";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -890,6 +907,9 @@ export default function IssuesPage() {
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null);
   const [resolveModalIssue, setResolveModalIssue] =
     useState<GithubIssue | null>(null);
+  const [sheetIssue, setSheetIssue] = useState<GithubIssue | null>(null);
+  const [view, setView] = useState<"list" | "map">("list");
+  const [filters, setFilters] = useState<IssueFilterState>(defaultIssueFilters);
   const [triggeringNumber, setTriggeringNumber] = useState<number | null>(null);
   const [triagingNumber, setTriagingNumber] = useState<number | null>(null);
   const [batchTriaging, setBatchTriaging] = useState(false);
@@ -931,7 +951,59 @@ export default function IssuesPage() {
     refetchIntervalInBackground: false,
   });
 
-  const issues = issuesData?.issues ?? [];
+  const issues = useMemo(
+    () => issuesData?.issues ?? [],
+    [issuesData?.issues],
+  );
+
+  const filteredIssues = useMemo(() => {
+    return issues.filter((issue) => {
+      const input: TriageMapIssueInput = {
+        number: issue.number,
+        title: issue.title,
+        labels: issue.labels,
+        createdAt: issue.createdAt,
+        triage: issue.triage
+          ? {
+              confidence: issue.triage.confidence,
+              effort: issue.triage.effort,
+              risk: issue.triage.risk,
+              reason: issue.triage.reason,
+              stale: issue.triage.stale,
+              errorMsg: issue.triage.errorMsg,
+            }
+          : null,
+      };
+      return matchesIssueFilters(input, filters);
+    });
+  }, [issues, filters]);
+
+  const mapInputs: TriageMapIssueInput[] = useMemo(
+    () =>
+      filteredIssues.map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        labels: issue.labels,
+        createdAt: issue.createdAt,
+        triage: issue.triage
+          ? {
+              confidence: issue.triage.confidence,
+              effort: issue.triage.effort,
+              risk: issue.triage.risk,
+              reason: issue.triage.reason,
+              stale: issue.triage.stale,
+              errorMsg: issue.triage.errorMsg,
+            }
+          : null,
+      })),
+    [filteredIssues],
+  );
+
+  const plotPoints = useMemo(() => toPlotPoints(mapInputs), [mapInputs]);
+  const missingOnMap = useMemo(
+    () => countMissingTriage(mapInputs),
+    [mapInputs],
+  );
 
   // Resolve mutation
   const resolveMutation = useMutation({
@@ -1001,6 +1073,8 @@ export default function IssuesPage() {
           selectedRepoId={effectiveRepoId ?? ""}
           onSelect={(id) => {
             setSelectedRepoId(id);
+            setFilters(defaultIssueFilters());
+            setSheetIssue(null);
             queryClient.invalidateQueries({ queryKey: ["issues", id] });
           }}
         />
@@ -1054,8 +1128,12 @@ export default function IssuesPage() {
 
           {!isLoading && !issuesError && issues.length > 0 && (
             <SectionCard
-              title={`Open issues · ${issues.length}`}
-              description={`Showing open issues for ${issuesData?.repoFullName}. Triage scores how safely AI can resolve each issue; Resolve remains optional.`}
+              title={`Open issues · ${filteredIssues.length}${
+                filteredIssues.length !== issues.length
+                  ? ` of ${issues.length}`
+                  : ""
+              }`}
+              description={`Showing open issues for ${issuesData?.repoFullName}. Use the map to spot good AI candidates; Resolve remains optional.`}
               action={
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -1094,30 +1172,109 @@ export default function IssuesPage() {
               }
             >
               <div className="space-y-4">
-                {issues.map((issue) => (
-                  <IssueCard
-                    key={issue.number}
-                    issue={issue}
-                    onResolve={(i) => setResolveModalIssue(i)}
-                    onTriage={(i) => {
-                      if (!effectiveRepoId) return;
-                      triageMutation.mutate({
-                        repoId: effectiveRepoId,
-                        issueNumber: i.number,
-                        force: true,
-                      });
-                    }}
-                    isTriggering={triggeringNumber === issue.number}
-                    isTriaging={
-                      batchTriaging || triagingNumber === issue.number
-                    }
-                  />
-                ))}
+                <IssueFilters filters={filters} onChange={setFilters} />
+
+                <Tabs
+                  value={view}
+                  onValueChange={(v) => setView(v as "list" | "map")}
+                >
+                  <TabsList variant="line">
+                    <TabsTrigger value="list">
+                      <LayoutList className="size-4" />
+                      List
+                    </TabsTrigger>
+                    <TabsTrigger value="map">
+                      <MapIcon className="size-4" />
+                      Map
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="list" className="mt-4 space-y-4">
+                    {filteredIssues.length === 0 ? (
+                      <EmptyState
+                        icon={<Clock3 className="size-5" />}
+                        title="No issues match filters"
+                        description="Clear or adjust effort, risk, confidence, or label filters to see issues again."
+                      />
+                    ) : (
+                      filteredIssues.map((issue) => (
+                        <IssueCard
+                          key={issue.number}
+                          issue={issue}
+                          onResolve={(i) => setResolveModalIssue(i)}
+                          onTriage={(i) => {
+                            if (!effectiveRepoId) return;
+                            triageMutation.mutate({
+                              repoId: effectiveRepoId,
+                              issueNumber: i.number,
+                              force: true,
+                            });
+                          }}
+                          isTriggering={triggeringNumber === issue.number}
+                          isTriaging={
+                            batchTriaging || triagingNumber === issue.number
+                          }
+                        />
+                      ))
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="map" className="mt-4">
+                    <TriageMap
+                      points={plotPoints}
+                      missingCount={missingOnMap}
+                      selectedIssueNumber={sheetIssue?.number ?? null}
+                      onSelect={(issueNumber) => {
+                        const found = issues.find(
+                          (i) => i.number === issueNumber,
+                        );
+                        if (found) setSheetIssue(found);
+                      }}
+                      onTriageMissing={() => {
+                        if (
+                          !effectiveRepoId ||
+                          needsTriageNumbers.length === 0
+                        )
+                          return;
+                        triageMutation.mutate({
+                          repoId: effectiveRepoId,
+                          issueNumbers: needsTriageNumbers,
+                        });
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
               </div>
             </SectionCard>
           )}
         </>
       )}
+
+      <IssueDetailSheet
+        issue={sheetIssue}
+        open={!!sheetIssue}
+        onClose={() => setSheetIssue(null)}
+        onResolve={() => {
+          if (!sheetIssue) return;
+          setResolveModalIssue(sheetIssue);
+          setSheetIssue(null);
+        }}
+        onTriage={() => {
+          if (!effectiveRepoId || !sheetIssue) return;
+          triageMutation.mutate({
+            repoId: effectiveRepoId,
+            issueNumber: sheetIssue.number,
+            force: true,
+          });
+        }}
+        isTriggering={
+          !!sheetIssue && triggeringNumber === sheetIssue.number
+        }
+        isTriaging={
+          !!sheetIssue &&
+          (batchTriaging || triagingNumber === sheetIssue.number)
+        }
+      />
 
       {/* Resolve modal */}
       <IssueResolveModal
