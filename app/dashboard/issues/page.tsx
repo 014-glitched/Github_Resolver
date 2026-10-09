@@ -52,6 +52,24 @@ type IssueJobStatus =
   | "FAILED"
   | "CANCELLED";
 
+type PrOutcomeState =
+  | "OPEN"
+  | "MERGED"
+  | "CLOSED_UNMERGED"
+  | "CHANGES_REQUESTED";
+
+type PrOutcome = {
+  state: PrOutcomeState;
+  prNumber: number;
+  prUrl: string;
+  openedAt: string | null;
+  mergedAt: string | null;
+  closedAt: string | null;
+  changesRequestedAt: string | null;
+  lastObservedAt: string;
+  githubUpdatedAt: string | null;
+};
+
 type IssueJob = {
   id: string;
   status: IssueJobStatus;
@@ -61,7 +79,34 @@ type IssueJob = {
   verifyVerdict: string | null;
   createdAt: string;
   completedAt: string | null;
+  prOutcome: PrOutcome | null;
 };
+
+function prOutcomeLabel(state: PrOutcomeState): string {
+  switch (state) {
+    case "OPEN":
+      return "OPEN";
+    case "MERGED":
+      return "MERGED";
+    case "CLOSED_UNMERGED":
+      return "CLOSED";
+    case "CHANGES_REQUESTED":
+      return "CHANGES REQUESTED";
+  }
+}
+
+function prOutcomeBadgeClass(state: PrOutcomeState): string {
+  switch (state) {
+    case "OPEN":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
+    case "MERGED":
+      return "border-success/30 bg-success/10 text-success";
+    case "CLOSED_UNMERGED":
+      return "border-muted-foreground/30 bg-muted text-muted-foreground";
+    case "CHANGES_REQUESTED":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+}
 
 type IssueTriage = {
   confidence: number;
@@ -656,19 +701,27 @@ function IssueCard({
           </div>
         ) : null}
 
-        {/* PR link — shown when completed */}
+        {/* PR link + outcome — shown when completed */}
         {isResolved && job?.prUrl ? (
           <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-success/20 bg-success/10 p-4 text-sm text-success">
             <CheckCircle2 className="size-4 shrink-0" />
+            {job.prOutcome ? (
+              <Badge
+                variant="outline"
+                className={prOutcomeBadgeClass(job.prOutcome.state)}
+              >
+                {prOutcomeLabel(job.prOutcome.state)}
+              </Badge>
+            ) : null}
             <span>
               Fix ready.{" "}
               <a
-                href={job.prUrl}
+                href={job.prOutcome?.prUrl ?? job.prUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium underline underline-offset-4 hover:text-success"
               >
-                View PR #{job.prNumber} on GitHub
+                View PR #{job.prOutcome?.prNumber ?? job.prNumber} on GitHub
               </a>
             </span>
             {job.verifyVerdict === "revised" && (
