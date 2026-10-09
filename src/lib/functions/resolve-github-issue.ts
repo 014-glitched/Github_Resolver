@@ -7,6 +7,28 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+type HttpLikeError = { status?: number; message?: string };
+
+function asHttpLikeError(err: unknown): HttpLikeError {
+  if (typeof err === "object" && err !== null) {
+    const e = err as { status?: unknown; message?: unknown };
+    return {
+      status: typeof e.status === "number" ? e.status : undefined,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  return { message: String(err) };
+}
+
+type CodeFile = { path: string; content: string };
+
+type IssueResolveContext = {
+  files: CodeFile[];
+  comments: string[];
+  accessToken: string;
+  repoFullName: string;
+};
+
 // ── Retry wrapper (same as resolve-event.ts) ──────────────
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -16,10 +38,11 @@ async function withRetry<T>(
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const httpErr = asHttpLikeError(err);
       const isLast = attempt === retries;
-      const isRateLimit = err?.status === 429;
-      const isTransient = [500, 502, 503].includes(err?.status);
+      const isRateLimit = httpErr.status === 429;
+      const isTransient = [500, 502, 503].includes(httpErr.status ?? -1);
       if (isLast || (!isRateLimit && !isTransient)) throw err;
       const wait = isRateLimit ? 60000 : delayMs * attempt;
       await new Promise((r) => setTimeout(r, wait));
@@ -90,7 +113,9 @@ export const resolveGithubIssue = inngest.createFunction(
     // 1. Issue comments — often contain stack traces, repro steps, extra context
     // 2. Repo file tree — to find files relevant to the issue
     // 3. File contents — the actual code Claude will fix
-    const context = await step.run("fetch-context", async () => {
+    const context = await step.run(
+      "fetch-context",
+      async (): Promise<IssueResolveContext> => {
       const job = await prisma.githubIssueJob.findUnique({
         where: { id: jobId },
         include: {
@@ -125,9 +150,12 @@ export const resolveGithubIssue = inngest.createFunction(
         comments = commentsRes.data.map(
           (c) => `@${c.user?.login ?? "unknown"}: ${c.body ?? ""}`,
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Comments are supplementary — log but don't fail the job
-        console.warn("[resolve-issue] Failed to fetch comments:", err?.message);
+        console.warn(
+          "[resolve-issue] Failed to fetch comments:",
+          asHttpLikeError(err).message,
+        );
       }
 
       // ── Fetch repo file tree ──────────────────────────────
@@ -158,10 +186,10 @@ export const resolveGithubIssue = inngest.createFunction(
               !item.path?.includes("yarn.lock"),
           )
           .map((item) => item.path ?? "");
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.warn(
           "[resolve-issue] Failed to fetch file tree:",
-          err?.message,
+          asHttpLikeError(err).message,
         );
       }
 
@@ -208,15 +236,16 @@ Example: ["src/components/Button.tsx", "src/utils/auth.ts"]
               // Only keep paths that actually exist in the tree
               relevantFilePaths = parsed
                 .filter(
-                  (p: any) => typeof p === "string" && fileTree.includes(p),
+                  (p: unknown): p is string =>
+                    typeof p === "string" && fileTree.includes(p),
                 )
                 .slice(0, 5);
             }
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.warn(
             "[resolve-issue] File picker Claude call failed:",
-            err?.message,
+            asHttpLikeError(err).message,
           );
         }
       }
@@ -242,9 +271,10 @@ Example: ["src/components/Button.tsx", "src/utils/auth.ts"]
               ),
             });
           }
-        } catch (err: any) {
-          console.warn(`[resolve-issue] Skipped ${filePath}:`, err?.message);
-          skippedFiles.push(`${filePath} (${err?.message ?? "unknown"})`);
+        } catch (err: unknown) {
+          const msg = asHttpLikeError(err).message ?? "unknown";
+          console.warn(`[resolve-issue] Skipped ${filePath}:`, msg);
+          skippedFiles.push(`${filePath} (${msg})`);
         }
       }
 
@@ -273,12 +303,16 @@ Example: ["src/components/Button.tsx", "src/utils/auth.ts"]
         accessToken,
         repoFullName: job.repo.fullName,
       };
-    });
+      },
+    );
 
     // ── Step 3: Generate fix (Claude Pass 1) ────────────────
     const patch = await step.run("generate-fix", async () => {
       const filesContent = context.files
-        .map((f: any) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
+        .map(
+          (f) =>
+            `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``,
+        )
         .join("\n\n");
 
       const commentsBlock =
@@ -383,11 +417,11 @@ ${filesContent}
       });
 
       const originalFilesContent = context.files
-        .map((f: any) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
+        .map((f) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
         .join("\n\n");
 
       const proposedFilesContent = patch.files
-        .map((f: any) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
+        .map((f) => `### File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
         .join("\n\n");
 
       const verifyPrompt = `
@@ -548,8 +582,8 @@ ${proposedFilesContent}
               sha: baseSha,
             }),
           );
-        } catch (err: any) {
-          if (err?.status === 422) {
+        } catch (err: unknown) {
+          if (asHttpLikeError(err).status === 422) {
             console.warn(
               `[resolve-issue] Branch ${branchName} already exists — continuing`,
             );
@@ -577,10 +611,11 @@ ${proposedFilesContent}
           if ("sha" in existing.data) {
             currentFileSha = existing.data.sha;
           }
-        } catch (err: any) {
-          if (err?.status !== 404) {
+        } catch (err: unknown) {
+          const httpErr = asHttpLikeError(err);
+          if (httpErr.status !== 404) {
             throw new Error(
-              `Failed to get SHA for ${file.path}: ${err?.message}`,
+              `Failed to get SHA for ${file.path}: ${httpErr.message}`,
             );
           }
         }
@@ -648,7 +683,7 @@ ${proposedFilesContent}
         verified.review_note ? `> ${verified.review_note}` : "",
         "",
         "### 📁 Files Changed",
-        filesToCommit.map((f: any) => `- \`${f.path}\``).join("\n"),
+        filesToCommit.map((f: CodeFile) => `- \`${f.path}\``).join("\n"),
         "",
         "---",
         "_This PR was automatically generated by [GitHubResolver](https://github.com) using Claude AI._",
@@ -675,8 +710,12 @@ ${proposedFilesContent}
       };
     });
 
-    // ── Step 6: Mark completed ───────────────────────────────
+    // ── Step 6: Mark completed + seed PrOutcome ──────────────
     await step.run("mark-completed", async () => {
+      const { upsertOutcomeOnPrCreated } = await import(
+        "@/src/lib/pr-outcome/service"
+      );
+
       await prisma.githubIssueJob.update({
         where: { id: jobId },
         data: {
@@ -686,6 +725,16 @@ ${proposedFilesContent}
           branchName: prResult.branchName,
           completedAt: new Date(),
         },
+      });
+
+      await upsertOutcomeOnPrCreated({
+        userId,
+        repoId,
+        jobId,
+        issueNumber,
+        prNumber: prResult.prNumber,
+        prUrl: prResult.prUrl,
+        openedAt: new Date(),
       });
     });
 

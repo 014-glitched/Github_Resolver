@@ -20,6 +20,7 @@ model Repo {
   events    GithubEvent[]
   issueJobs GithubIssueJob[]
   triages   IssueTriage[]
+  prOutcomes PrOutcome[]
 }
 
 model Verification {
@@ -48,6 +49,7 @@ model User {
   githubEvents  GithubEvent[]
   issueJobs     GithubIssueJob[]
   triages       IssueTriage[]
+  prOutcomes    PrOutcome[]
 
   @@map("user")
 }
@@ -182,6 +184,7 @@ model GithubIssueJob {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  prOutcome PrOutcome?
 
   // One active job per issue per repo at a time
   // Prevents duplicate resolve jobs for the same issue
@@ -236,4 +239,50 @@ enum TriageRisk {
   low
   medium
   high
+}
+
+// Current lifecycle outcome for an AI-generated pull request.
+// Linked 1:1 to GithubIssueJob; identity is (repoId, prNumber).
+model PrOutcome {
+  id                 String         @id @default(cuid())
+  userId             String
+  repoId             String
+  jobId              String         @unique
+  issueNumber        Int
+  prNumber           Int
+  prUrl              String
+  state              PrOutcomeState @default(OPEN)
+  openedAt           DateTime?
+  mergedAt           DateTime?
+  closedAt           DateTime?
+  changesRequestedAt DateTime?
+  lastObservedAt     DateTime       @default(now())
+  githubUpdatedAt    DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repo Repo           @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  job  GithubIssueJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, prNumber])
+  @@index([repoId])
+  @@index([state])
+}
+
+enum PrOutcomeState {
+  OPEN
+  MERGED
+  CLOSED_UNMERGED
+  CHANGES_REQUESTED
+}
+
+// Idempotency for GitHub webhook deliveries (x-github-delivery).
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  deliveryId  String   @unique
+  event       String
+  action      String?
+  repoId      String?
+  processedAt DateTime @default(now())
 }

@@ -1,6 +1,11 @@
 import { auth } from "@/src/lib/auth";
 import prisma from "@/src/lib/prisma";
 import {
+  getPrOutcomesForRepo,
+  toPrOutcomeView,
+} from "@/src/lib/pr-outcome/service";
+import type { PrOutcomeView } from "@/src/lib/pr-outcome/schema";
+import {
   getTriagesForRepo,
   toTriageView,
   type IssueTriageRow,
@@ -22,7 +27,7 @@ type GithubIssueItem = {
   pull_request?: unknown;
 };
 
-type IssueJobSummary = {
+type IssueJobRow = {
   id: string;
   issueNumber: number;
   status: string;
@@ -32,6 +37,10 @@ type IssueJobSummary = {
   verifyVerdict: string | null;
   createdAt: Date;
   completedAt: Date | null;
+};
+
+type IssueJobSummary = IssueJobRow & {
+  prOutcome: PrOutcomeView | null;
 };
 
 export async function GET(req: Request) {
@@ -92,7 +101,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const existingJobs: IssueJobSummary[] = await prisma.githubIssueJob.findMany({
+  const existingJobs: IssueJobRow[] = await prisma.githubIssueJob.findMany({
     where: { repoId },
     select: {
       id: true,
@@ -107,8 +116,29 @@ export async function GET(req: Request) {
     },
   });
 
+  // PR outcomes are optional — never fail the whole issues list if lookup fails
+  let outcomeByJobId = new Map<string, ReturnType<typeof toPrOutcomeView>>();
+  try {
+    const outcomeMap = await getPrOutcomesForRepo(repoId);
+    outcomeByJobId = new Map(
+      [...outcomeMap.entries()].map(([jobId, row]) => [
+        jobId,
+        toPrOutcomeView(row),
+      ]),
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[issues/GET] pr-outcome lookup failed:", message);
+  }
+
   const jobMap = new Map<number, IssueJobSummary>(
-    existingJobs.map((job: IssueJobSummary) => [job.issueNumber, job]),
+    existingJobs.map((job: IssueJobRow) => [
+      job.issueNumber,
+      {
+        ...job,
+        prOutcome: outcomeByJobId.get(job.id) ?? null,
+      },
+    ]),
   );
 
   // Triage is optional — never fail the whole issues list if lookup fails
