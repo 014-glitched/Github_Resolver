@@ -17,9 +17,11 @@ import {
   Tag,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { IssueDetailSheet } from "@/components/issues/issue-detail-sheet";
 import { IssueFilters } from "@/components/issues/issue-filters";
+import { JobProgress } from "@/components/issues/job-progress";
 import { TriageMap } from "@/components/issues/triage-map";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
@@ -49,6 +51,20 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  formatElapsed,
+  getJobCardState,
+  hasActiveJobs,
+  statusBadgeLabel,
+  type IssueJobStatus,
+} from "@/src/lib/issue-job/progress";
+
+function formatElapsedSafe(
+  startedAt: string,
+  completedAt: string,
+): string {
+  return formatElapsed(startedAt, completedAt) ?? "—";
+}
+import {
   countMissingTriage,
   defaultIssueFilters,
   matchesIssueFilters,
@@ -58,16 +74,6 @@ import {
 } from "@/src/lib/triage/map";
 
 // ── Types ─────────────────────────────────────────────────────
-
-type IssueJobStatus =
-  | "QUEUED"
-  | "FETCHING_CONTEXT"
-  | "ANALYZING"
-  | "VERIFYING"
-  | "CREATING_PR"
-  | "COMPLETED"
-  | "FAILED"
-  | "CANCELLED";
 
 type PrOutcomeState =
   | "OPEN"
@@ -95,6 +101,7 @@ type IssueJob = {
   errorMsg: string | null;
   verifyVerdict: string | null;
   createdAt: string;
+  startedAt: string | null;
   completedAt: string | null;
   prOutcome: PrOutcome | null;
 };
@@ -173,8 +180,22 @@ async function fetchIssues(
   repoId: string,
 ): Promise<{ issues: GithubIssue[]; repoFullName: string }> {
   const res = await fetch(`/api/github/issues?repoId=${repoId}`);
-  if (!res.ok) throw new Error("Failed to fetch issues");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof data.error === "string" ? data.error : "Failed to fetch issues",
+    );
+  }
   return res.json();
+}
+
+class ResolveConflictError extends Error {
+  job: IssueJob | null;
+  constructor(message: string, job: IssueJob | null) {
+    super(message);
+    this.name = "ResolveConflictError";
+    this.job = job;
+  }
 }
 
 async function triggerIssueResolve(payload: {
@@ -192,7 +213,13 @@ async function triggerIssueResolve(payload: {
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+      throw new ResolveConflictError(
+        data.error ?? "A resolve job already exists for this issue",
+        (data.job as IssueJob | undefined) ?? null,
+      );
+    }
     throw new Error(data.error ?? "Failed to trigger resolve");
   }
   return res.json();
@@ -254,41 +281,6 @@ function getLabelStyle(label: string): string {
   if (lower.includes("feature") || lower.includes("enhancement"))
     return "border-primary/20 bg-primary/10 text-primary";
   return "border-border/60 bg-muted/40 text-muted-foreground";
-}
-
-// Job step definitions — matches the IssueJobStatus flow
-const issueJobSteps: { key: IssueJobStatus; label: string }[] = [
-  { key: "FETCHING_CONTEXT", label: "Fetching issue context" },
-  { key: "ANALYZING", label: "Generating fix with Claude" },
-  { key: "VERIFYING", label: "Verifying fix (self-review)" },
-  { key: "CREATING_PR", label: "Creating pull request" },
-];
-
-function getStepState(
-  stepKey: IssueJobStatus,
-  currentStatus: IssueJobStatus,
-): "done" | "active" | "pending" {
-  const order: IssueJobStatus[] = [
-    "QUEUED",
-    "FETCHING_CONTEXT",
-    "ANALYZING",
-    "VERIFYING",
-    "CREATING_PR",
-    "COMPLETED",
-  ];
-  const stepIndex = order.indexOf(stepKey);
-  const currentIndex = order.indexOf(currentStatus);
-  if (currentStatus === "COMPLETED") return "done";
-  if (stepIndex < currentIndex) return "done";
-  if (stepIndex === currentIndex) return "active";
-  return "pending";
-}
-
-function getJobCardState(job: IssueJob | null) {
-  if (!job) return "idle";
-  if (job.status === "COMPLETED") return "resolved";
-  if (job.status === "FAILED" || job.status === "CANCELLED") return "failed";
-  return "resolving";
 }
 
 // ── Resolve Modal ─────────────────────────────────────────────
@@ -654,68 +646,28 @@ function IssueCard({
               variant="outline"
               className="h-6 shrink-0 rounded-full border-destructive/20 bg-destructive/10 px-2.5 text-xs text-destructive"
             >
-              Failed
+              {job ? statusBadgeLabel(job.status) : "Failed"}
             </Badge>
           )}
-          {isResolving && (
+          {isResolving && job && (
             <Badge
               variant="outline"
               className="h-6 shrink-0 rounded-full border-primary/20 bg-primary/10 px-2.5 text-xs text-primary"
             >
               <LoaderCircle className="mr-1 size-3 animate-spin" />
-              {job?.status === "QUEUED"
-                ? "Queued"
-                : job?.status === "FETCHING_CONTEXT"
-                  ? "Fetching"
-                  : job?.status === "ANALYZING"
-                    ? "Analyzing"
-                    : job?.status === "VERIFYING"
-                      ? "Verifying"
-                      : "Creating PR"}
+              {statusBadgeLabel(job.status)}
             </Badge>
           )}
         </div>
 
-        {/* Progress steps — shown while resolving */}
-        {isResolving && job ? (
-          <div className="mt-4 rounded-lg border border-border/60 bg-background/60 p-4">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Resolving
-            </p>
-            <div className="flex flex-col gap-3">
-              {issueJobSteps.map((s) => {
-                const state = getStepState(s.key, job.status);
-                return (
-                  <div key={s.key} className="flex items-center gap-3">
-                    {state === "done" && (
-                      <div className="flex size-5 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-success">
-                        <Check className="size-3" />
-                      </div>
-                    )}
-                    {state === "active" && (
-                      <div className="flex size-5 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
-                        <LoaderCircle className="size-3 animate-spin" />
-                      </div>
-                    )}
-                    {state === "pending" && (
-                      <div className="size-5 shrink-0 rounded-full border border-border/70" />
-                    )}
-                    <span
-                      className={`text-sm ${
-                        state === "done"
-                          ? "text-success"
-                          : state === "active"
-                            ? "text-foreground"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {s.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        {/* Progress tracker — active or failed jobs */}
+        {(isResolving || isFailed) && job ? (
+          <JobProgress
+            status={job.status}
+            startedAt={job.startedAt}
+            completedAt={job.completedAt}
+            errorMsg={job.errorMsg}
+          />
         ) : null}
 
         {/* PR link + outcome — shown when completed */}
@@ -741,6 +693,13 @@ function IssueCard({
                 View PR #{job.prOutcome?.prNumber ?? job.prNumber} on GitHub
               </a>
             </span>
+            {job.completedAt || job.startedAt ? (
+              <span className="text-xs text-success/70">
+                {job.startedAt && job.completedAt
+                  ? `Done in ${formatElapsedSafe(job.startedAt, job.completedAt)}`
+                  : null}
+              </span>
+            ) : null}
             {job.verifyVerdict === "revised" && (
               <span className="ml-auto text-xs text-success/70">
                 ⚠️ AI revised fix before PR
@@ -754,12 +713,11 @@ function IssueCard({
           </div>
         ) : null}
 
-        {/* Error — shown when failed */}
-        {isFailed && job?.errorMsg ? (
-          <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/10 p-4">
-            <p className="text-sm text-destructive">
-              Failed: {job.errorMsg}
-            </p>
+        {/* Completed without PR URL (rare) */}
+        {isResolved && job && !job.prUrl ? (
+          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+            Job completed but no pull request URL was recorded. Refresh or check
+            GitHub for a branch opened by GitHubResolver.
           </div>
         ) : null}
 
@@ -825,14 +783,19 @@ function IssueCard({
               </Button>
             )}
 
-            {/* Failed — allow retry */}
+            {/* Failed — allow retry (server deletes FAILED job) */}
             {isFailed && (
               <Button
                 size="sm"
+                disabled={isTriggering}
                 onClick={() => onResolve(issue)}
                 className="shadow-sm"
               >
-                <RefreshCcw className="size-4" />
+                {isTriggering ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="size-4" />
+                )}
                 Retry
               </Button>
             )}
@@ -920,15 +883,8 @@ export default function IssuesPage() {
     isLoading: reposLoading,
     isError: reposError,
   } = useQuery({
-    queryKey: ["repos"],
+    queryKey: ["connected-repos"],
     queryFn: fetchRepos,
-    // Auto-select first repo once loaded
-    select: (data) => {
-      if (!selectedRepoId && data.repos.length > 0) {
-        // Note: we set this in the render below to avoid issues with select
-      }
-      return data;
-    },
   });
 
   const repos = reposData?.repos ?? [];
@@ -946,8 +902,12 @@ export default function IssuesPage() {
     queryKey: ["issues", effectiveRepoId],
     queryFn: () => fetchIssues(effectiveRepoId!),
     enabled: !!effectiveRepoId,
-    // Poll every 5 seconds to get live job status updates
-    refetchInterval: 5000,
+    retry: false,
+    // Poll only while at least one job is non-terminal
+    refetchInterval: (query) => {
+      const list = query.state.data?.issues ?? [];
+      return hasActiveJobs(list.map((i) => i.job)) ? 5000 : false;
+    },
     refetchIntervalInBackground: false,
   });
 
@@ -1005,19 +965,40 @@ export default function IssuesPage() {
     [mapInputs],
   );
 
+  const [resolveNotice, setResolveNotice] = useState<string | null>(null);
+
   // Resolve mutation
   const resolveMutation = useMutation({
     mutationFn: triggerIssueResolve,
-    onMutate: ({ issueNumber }) => setTriggeringNumber(issueNumber),
+    onMutate: ({ issueNumber }) => {
+      setTriggeringNumber(issueNumber);
+      setResolveNotice(null);
+    },
     onError: (error) => {
       setTriggeringNumber(null);
-      console.error("Failed to resolve issue:", error);
+      if (error instanceof ResolveConflictError) {
+        const message = error.job
+          ? `A job is already ${statusBadgeLabel(error.job.status).toLowerCase()} for this issue. Tracking existing progress.`
+          : error.message;
+        setResolveNotice(message);
+        toast.error(message);
+        queryClient.invalidateQueries({
+          queryKey: ["issues", effectiveRepoId],
+        });
+        setResolveModalIssue(null);
+        return;
+      }
+      const message =
+        error instanceof Error ? error.message : "Failed to start resolve";
+      setResolveNotice(message);
+      toast.error(message);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["issues", effectiveRepoId],
       });
       setResolveModalIssue(null);
+      setResolveNotice(null);
     },
     onSettled: () => setTriggeringNumber(null),
   });
@@ -1029,7 +1010,9 @@ export default function IssuesPage() {
       if (vars.issueNumbers?.length) setBatchTriaging(true);
     },
     onError: (error) => {
-      console.error("Failed to triage issue:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to triage issue",
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -1107,6 +1090,20 @@ export default function IssuesPage() {
       {/* Issues section */}
       {effectiveRepoId && (
         <>
+          {resolveNotice ? (
+            <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+              <p>{resolveNotice}</p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 shrink-0"
+                onClick={() => setResolveNotice(null)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
+
           {isLoading && <IssuesLoading />}
 
           {issuesError && !issuesLoading && (

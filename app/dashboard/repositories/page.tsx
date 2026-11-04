@@ -12,6 +12,7 @@ import {
   Sparkles,
   Unplug,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
@@ -41,6 +42,11 @@ async function fetchRepos(): Promise<{ repos: Repo[] }> {
   return res.json();
 }
 
+async function readApiError(res: Response, fallback: string) {
+  const data = await res.json().catch(() => ({}));
+  return typeof data.error === "string" ? data.error : fallback;
+}
+
 async function connectRepo(repo: Repo) {
   const res = await fetch("/api/github/connect", {
     method: "POST",
@@ -53,7 +59,7 @@ async function connectRepo(repo: Repo) {
     }),
   });
 
-  if (!res.ok) throw new Error("Failed to connect Repo");
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to connect repository"));
   return res.json();
 }
 
@@ -64,7 +70,7 @@ async function disconnectRepo(githubId: number) {
     body: JSON.stringify({ githubId }),
   });
 
-  if (!res.ok) throw new Error("Failed to disconnect Repo");
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to disconnect repository"));
   return res.json();
 }
 
@@ -280,7 +286,7 @@ export default function RepositoriesPage() {
   const [loadingId, setLoadingId] = useState<number | null>(null);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["repos"],
+    queryKey: ["github-repos"],
     queryFn: fetchRepos,
     staleTime: 1000 * 60 * 2,
   });
@@ -289,7 +295,13 @@ export default function RepositoriesPage() {
     mutationFn: connectRepo,
     onMutate: (repo) => setLoadingId(repo.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["github-repos"] });
+      queryClient.invalidateQueries({ queryKey: ["connected-repos"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to connect repository",
+      );
     },
     onSettled: () => setLoadingId(null),
   });
@@ -298,7 +310,15 @@ export default function RepositoriesPage() {
     mutationFn: disconnectRepo,
     onMutate: (id) => setLoadingId(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["github-repos"] });
+      queryClient.invalidateQueries({ queryKey: ["connected-repos"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to disconnect repository",
+      );
     },
     onSettled: () => setLoadingId(null),
   });
@@ -346,7 +366,9 @@ export default function RepositoriesPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => queryClient.invalidateQueries({ queryKey: ["repos"] })}
+                onClick={() =>
+                  queryClient.invalidateQueries({ queryKey: ["github-repos"] })
+                }
               >
                 <RefreshCcw className="size-4" />
                 Refresh

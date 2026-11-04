@@ -2,6 +2,7 @@
 
 import { LoaderCircle, Sparkles } from "lucide-react";
 
+import { JobProgress } from "@/components/issues/job-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import type { IssueJobStatus } from "@/src/lib/issue-job/progress";
 import { formatAgeDays, ageDaysFromCreatedAt } from "@/src/lib/triage/map";
 
 export type IssueDetailSheetIssue = {
@@ -28,6 +30,14 @@ export type IssueDetailSheetIssue = {
     reason: string;
     stale: boolean;
     errorMsg: string | null;
+  } | null;
+  job: {
+    status: IssueJobStatus;
+    startedAt: string | null;
+    completedAt: string | null;
+    errorMsg: string | null;
+    prUrl: string | null;
+    prNumber: number | null;
   } | null;
 };
 
@@ -75,6 +85,18 @@ export function IssueDetailSheet({
             </SheetHeader>
 
             <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-2">
+              {issue.job ? (
+                <JobProgress
+                  compact
+                  status={issue.job.status}
+                  startedAt={issue.job.startedAt}
+                  completedAt={issue.job.completedAt}
+                  errorMsg={issue.job.errorMsg}
+                  prUrl={issue.job.prUrl}
+                  prNumber={issue.job.prNumber}
+                />
+              ) : null}
+
               {issue.triage && !issue.triage.errorMsg ? (
                 <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
                   <div className="flex flex-wrap gap-1.5">
@@ -150,11 +172,28 @@ export function IssueDetailSheet({
                 )}
                 {issue.triage ? "Re-triage" : "Triage"}
               </Button>
-              <Button onClick={onResolve} disabled={isTriggering}>
+              <Button
+                onClick={onResolve}
+                disabled={
+                  isTriggering ||
+                  Boolean(
+                    issue.job &&
+                      issue.job.status !== "FAILED" &&
+                      issue.job.status !== "CANCELLED",
+                  )
+                }
+              >
                 {isTriggering ? (
                   <LoaderCircle className="size-4 animate-spin" />
                 ) : null}
-                Resolve with AI
+                {issue.job?.status === "FAILED" ||
+                issue.job?.status === "CANCELLED"
+                  ? "Retry resolve"
+                  : issue.job?.status === "COMPLETED"
+                    ? "Already resolved"
+                    : issue.job
+                      ? "Resolve in progress"
+                      : "Resolve with AI"}
               </Button>
             </SheetFooter>
           </>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
 import { QueryProvider } from "@/src/providers/query-provider";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -32,7 +33,10 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          {children}
+          <Toaster richColors closeButton />
+        </QueryProvider>
       </body>
     </html>
   );

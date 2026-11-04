@@ -34,6 +34,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { signOut } from "@/src/lib/auth-client";
+import { toast } from "sonner";
 
 type UserProfile = {
   id: string;
@@ -64,11 +65,16 @@ async function fetchProfile(): Promise<{ user: UserProfile }> {
   return res.json();
 }
 
+async function readApiError(res: Response, fallback: string) {
+  const data = await res.json().catch(() => ({}));
+  return typeof data.error === "string" ? data.error : fallback;
+}
+
 async function disconnectAll() {
   const res = await fetch("/api/settings/disconnect-all", {
     method: "POST",
   });
-  if (!res.ok) throw new Error("Failed to disconnect all repos");
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to disconnect all repos"));
   return res.json();
 }
 
@@ -76,7 +82,7 @@ async function deleteAccount() {
   const res = await fetch("/api/settings/delete-account", {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Failed to delete account");
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to delete account"));
   return res.json();
 }
 
@@ -86,17 +92,17 @@ async function disconnectRepo(githubId: number) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ githubId }),
   });
-  if (!res.ok) throw new Error("Failed to disconnect repo");
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to disconnect repo"));
   return res.json();
 }
 
-async function refreshCI(repoId: string){
-  const res = await fetch("api/github/refresh-ci", {
+async function refreshCI(repoId: string) {
+  const res = await fetch("/api/github/refresh-ci", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repoId })
-  })
-  if (!res.ok) throw new Error("Failed to refresh CI status");
+    body: JSON.stringify({ repoId }),
+  });
+  if (!res.ok) throw new Error(await readApiError(res, "Failed to refresh CI status"));
   return res.json();
 }
 
@@ -140,8 +146,16 @@ export default function SettingsPage() {
     mutationFn: disconnectAll,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings-profile"] });
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["github-repos"] });
+      queryClient.invalidateQueries({ queryKey: ["connected-repos"] });
       setDisconnectAllOpen(false);
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to disconnect all repositories",
+      );
     },
   });
 
@@ -151,6 +165,11 @@ export default function SettingsPage() {
       await signOut();
       router.push("/login");
     },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete account",
+      );
+    },
   });
 
   const disconnectRepoMutation = useMutation({
@@ -158,7 +177,15 @@ export default function SettingsPage() {
     onMutate: (repo) => setDisconnectingId(repo.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings-profile"] });
-      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["github-repos"] });
+      queryClient.invalidateQueries({ queryKey: ["connected-repos"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to disconnect repository",
+      );
     },
     onSettled: () => setDisconnectingId(null),
   });
@@ -167,10 +194,17 @@ export default function SettingsPage() {
     mutationFn: (repoId: string) => refreshCI(repoId),
     onMutate: (repoId) => setRefreshingCIId(repoId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings-profile"] })
+      queryClient.invalidateQueries({ queryKey: ["settings-profile"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to refresh CI status",
+      );
     },
     onSettled: () => setRefreshingCIId(null),
-  })
+  });
 
   const user = data?.user;
 
