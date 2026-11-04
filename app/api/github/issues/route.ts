@@ -36,6 +36,7 @@ type IssueJobRow = {
   errorMsg: string | null;
   verifyVerdict: string | null;
   createdAt: Date;
+  startedAt: Date | null;
   completedAt: Date | null;
 };
 
@@ -112,6 +113,7 @@ export async function GET(req: Request) {
       errorMsg: true,
       verifyVerdict: true,
       createdAt: true,
+      startedAt: true,
       completedAt: true,
     },
   });

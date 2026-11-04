@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
+import { toast } from "sonner";
 
 import { GitHubIcon } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
@@ -27,16 +28,38 @@ export function GithubSignInButton({
   showArrow = true,
   callbackURL = "/dashboard",
 }: GithubSignInButtonProps) {
+  const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const handleGithubLogin = async () => {
+    if (!mounted || loading) return;
+
     setLoading(true);
     try {
-      await signIn.social({
+      const result = await signIn.social({
         provider: "github",
         callbackURL,
       });
-    } catch {
+
+      if (result?.error) {
+        const message =
+          result.error.message ||
+          result.error.statusText ||
+          "GitHub sign-in failed. Please try again.";
+        toast.error(message);
+        setLoading(false);
+      }
+      // On success better-auth redirects via window.location; keep loading true.
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "GitHub sign-in failed. Please try again.";
+      toast.error(message);
       setLoading(false);
     }
   };
@@ -44,7 +67,7 @@ export function GithubSignInButton({
   return (
     <Button
       onClick={handleGithubLogin}
-      disabled={loading}
+      disabled={!mounted || loading}
       variant={variant}
       size={size}
       className={cn(className)}
